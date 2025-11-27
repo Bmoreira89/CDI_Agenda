@@ -1,0 +1,45 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model MedicoAgenda {
+  id        Int           @id @default(autoincrement())
+  nome      String
+  crm       String?
+  email     String        @unique
+  senha     String?
+  perfil    String        // "medico" ou "admin"
+  createdAt DateTime      @default(now())
+
+  eventos   EventoAgenda[]
+  logs      LogAcao[]
+}
+
+model CidadeAgenda {
+  id   Int    @id @default(autoincrement())
+  nome String @unique
+}
+
+model EventoAgenda {
+  id        Int      @id @default(autoincrement())
+  data      DateTime
+  descricao String
+
+  medicoId  Int
+  medico    MedicoAgenda @relation(fields: [medicoId], references: [id])
+}
+
+model LogAcao {
+  id        Int           @id @default(autoincrement())
+  usuarioId Int?
+  usuario   MedicoAgenda? @relation(fields: [usuarioId], references: [id])
+
+  acao      String
+  detalhes  String?
+  dataHora  DateTime      @default(now())
+}
