@@ -6,10 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "postinstall": "prisma generate",
     "lint": "next lint",
-    "seed": "node prisma/seed.cjs"
-  },
+    "prisma:migrate-deploy": "prisma migrate deploy",
+    "vercel-build": "npm run prisma:migrate-deploy && next build"
+  }
   "prisma": {
     "seed": "node prisma/seed.cjs"
   },
