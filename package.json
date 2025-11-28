@@ -9,7 +9,7 @@
     "lint": "next lint",
     "prisma:migrate-deploy": "prisma migrate deploy",
     "vercel-build": "npm run prisma:migrate-deploy && next build"
-  }
+  },
   "prisma": {
     "seed": "node prisma/seed.cjs"
   },
