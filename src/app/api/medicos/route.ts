@@ -1,21 +1,29 @@
+// src/app/api/medicos/route.ts
 import { NextResponse } from "next/server";
-import prisma from "@/src/lib/prisma";
+import prisma from "@/lib/prisma";
+import { registrarLog } from "@/lib/log";
 import bcrypt from "bcryptjs";
-import { registrarLog } from "@/src/lib/log";
 
 export async function GET() {
-  const medicos = await prisma.medicoAgenda.findMany({
-    orderBy: { nome: "asc" },
-  });
-
-  return NextResponse.json(medicos);
+  try {
+    const medicos = await prisma.medicoAgenda.findMany({
+      orderBy: { nome: "asc" },
+    });
+    return NextResponse.json(medicos);
+  } catch (error) {
+    console.error("Erro ao listar médicos:", error);
+    return NextResponse.json(
+      { message: "Erro ao listar médicos" },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(req: Request) {
   try {
     const { nome, crm, email, senha, perfil } = await req.json();
 
-    const senhaHash = await bcrypt.hash(senha, 10);
+    const senhaHash = await bcrypt.hash(senha || "123456", 10);
 
     const medico = await prisma.medicoAgenda.create({
       data: {
@@ -23,22 +31,21 @@ export async function POST(req: Request) {
         crm,
         email,
         senha: senhaHash,
-        perfil: perfil.toLowerCase(),
+        perfil: perfil === "admin" ? "admin" : "medico",
       },
     });
 
-    // log
-    await registrarLog(
-      0,
-      "criar_medico",
-      `Criado médico ${nome} (${email}), perfil: ${perfil}`
-    );
+    await registrarLog({
+      usuarioId: medico.id,
+      acao: "medico_criado",
+      detalhes: `Médico ${nome} (${email}) criado com perfil ${medico.perfil}`,
+    });
 
     return NextResponse.json(medico, { status: 201 });
   } catch (error) {
     console.error("Erro ao criar médico:", error);
     return NextResponse.json(
-      { error: "Erro ao criar médico" },
+      { message: "Erro ao criar médico" },
       { status: 500 }
     );
   }

@@ -14,3 +14,5 @@ export const prisma =
 if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = prisma;
 }
+export { default } from "@/lib/prisma";
+export * from "@/lib/prisma";

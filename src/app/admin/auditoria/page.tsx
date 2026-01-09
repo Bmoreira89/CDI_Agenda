@@ -3,7 +3,19 @@
 import { useEffect, useState } from "react";
 
 export default function AuditoriaPage() {
-  const [logs, setLogs] = useState([]);
+  type AuditoriaLog = {
+  id: string;
+  createdAt: string;
+  usuario?: {
+    nome?: string | null;
+    email?: string | null;
+  } | null;
+  acao?: string | null;
+  detalhes?: string | null;
+};
+
+const [logs, setLogs] = useState<AuditoriaLog[]>([]);
+
   const [loading, setLoading] = useState(true);
 
   async function carregarLogs() {

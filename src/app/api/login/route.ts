@@ -1,47 +1,61 @@
+// src/app/api/login/route.ts
 import { NextResponse } from "next/server";
-import prisma from "@/src/lib/prisma";
+import prisma from "@/lib/prisma";
+import { registrarLog } from "@/lib/log";
 import bcrypt from "bcryptjs";
-import { registrarLog } from "@/src/lib/log";
 
 export async function POST(req: Request) {
   try {
     const { email, senha } = await req.json();
 
-    const user = await prisma.medicoAgenda.findUnique({
+    const medico = await prisma.medicoAgenda.findUnique({
       where: { email },
     });
 
-    if (!user) {
-      // log de tentativa de login com e-mail inexistente
-      await registrarLog(0, "login_falhou", `Email não encontrado: ${email}`);
+    if (!medico || !medico.senha) {
+      await registrarLog({
+        usuarioId: medico?.id ?? null,
+        acao: "login_falha",
+        detalhes: `Login falhou para ${email}`,
+      });
+
       return NextResponse.json(
-        { error: "Usuário ou senha inválidos" },
+        { message: "Usuário ou senha inválidos" },
         { status: 401 }
       );
     }
 
-    const senhaValida = await bcrypt.compare(senha, user.senha!);
+    const senhaConfere = await bcrypt.compare(senha, medico.senha);
 
-    if (!senhaValida) {
-      await registrarLog(user.id, "login_falhou", "Senha incorreta");
+    if (!senhaConfere) {
+      await registrarLog({
+        usuarioId: medico.id,
+        acao: "login_falha",
+        detalhes: `Senha incorreta para ${email}`,
+      });
+
       return NextResponse.json(
-        { error: "Usuário ou senha inválidos" },
+        { message: "Usuário ou senha inválidos" },
         { status: 401 }
       );
     }
 
-    await registrarLog(user.id, "login", "Login efetuado com sucesso");
+    await registrarLog({
+      usuarioId: medico.id,
+      acao: "login_sucesso",
+      detalhes: `Login bem-sucedido para ${email}`,
+    });
 
     return NextResponse.json({
-      id: user.id,
-      nome: user.nome,
-      email: user.email,
-      perfil: user.perfil,
+      id: medico.id,
+      nome: medico.nome,
+      email: medico.email,
+      perfil: medico.perfil,
     });
   } catch (error) {
     console.error("Erro no login:", error);
     return NextResponse.json(
-      { error: "Erro interno no login" },
+      { message: "Erro ao realizar login" },
       { status: 500 }
     );
   }
