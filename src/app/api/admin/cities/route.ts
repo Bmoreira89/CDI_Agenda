@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,9 +13,10 @@ function isAdmin(session: any) {
 
 export async function GET() {
   try {
-    // Importações dinâmicas (evita quebrar build/collect)
+    // IMPORTS LAZY (evita quebrar no build/collect)
     const { getServerSession } = await import("next-auth");
     const { authOptions } = await import("@/lib/auth");
+    const { default: prisma } = await import("@/lib/prisma");
 
     const session = await getServerSession(authOptions);
 
@@ -31,7 +31,6 @@ export async function GET() {
 
     return NextResponse.json({ cidades });
   } catch (e: any) {
-    // Importante: não deixar exceção subir e derrubar o build
     return NextResponse.json(
       { error: "internal_error", details: e?.message ?? String(e) },
       { status: 500 }
