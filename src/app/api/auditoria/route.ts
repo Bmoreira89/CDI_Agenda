@@ -1,28 +1,37 @@
-// src/app/api/auditoria/route.ts
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 
 export async function GET() {
   try {
     const logs = await prisma.logAcao.findMany({
-      orderBy: { createdAt: "desc" },
+      orderBy: { dataHora: "desc" },
       take: 200,
       include: {
         usuario: {
           select: {
             id: true,
             nome: true,
-            email: true,
-          },
-        },
-      },
+            email: true
+          }
+        }
+      }
     });
 
-    return NextResponse.json(logs);
-  } catch (error) {
-    console.error("Erro ao buscar logs:", error);
+    // Normaliza para o front (que usa createdAt)
+    const logsNormalizados = logs.map((log) => ({
+      id: String(log.id),
+      createdAt: log.dataHora,
+      acao: log.acao,
+      detalhes: log.detalhes ?? "",
+      usuario: log.usuario
+        ? { nome: log.usuario.nome, email: log.usuario.email }
+        : null
+    }));
+
+    return NextResponse.json({ logs: logsNormalizados });
+  } catch (e: any) {
     return NextResponse.json(
-      { message: "Erro ao buscar logs" },
+      { error: "Erro ao buscar auditoria", details: e?.message ?? String(e) },
       { status: 500 }
     );
   }

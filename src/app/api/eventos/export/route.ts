@@ -1,68 +1,62 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-import ExcelJS from 'exceljs';
+import { NextResponse } from "next/server";
+import prisma from "@/lib/prisma";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 
-const prisma = new PrismaClient();
-
-export async function GET(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const ym = searchParams.get('ym');
-
-    if (!ym || !/^\d{4}-\d{2}$/.test(ym)) {
-      return NextResponse.json({ error: 'Parâmetro ym inválido. Use YYYY-MM.' }, { status: 400 });
-    }
-
-    const [y, m] = ym.split('-');
-    const year = Number(y);
-    const month0 = Number(m) - 1;
-
-    const start = new Date(year, month0, 1);
-    const end = new Date(year, month0 + 1, 0, 23, 59, 59, 999);
-
-    const events = await prisma.event.findMany({
-      where: {
-        start: { gte: start },
-        end: { lte: end }
-      },
-      orderBy: { start: "asc" }
-    });
-
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet(`Eventos_${ym}`);
-
-    ws.columns = [
-      { header: "ID", key: "id", width: 15 },
-      { header: "Título", key: "title", width: 40 },
-      { header: "Início", key: "start", width: 25 },
-      { header: "Fim", key: "end", width: 25 },
-      { header: "Local", key: "city", width: 25 },
-    ];
-
-    events.forEach(ev => {
-      ws.addRow({
-        id: ev.id,
-        title: ev.title,
-        start: ev.start,
-        end: ev.end,
-        city: (ev as any).city || "",
-      });
-    });
-
-    ws.getRow(1).font = { bold: true };
-
-    const buffer = await wb.xlsx.writeBuffer();
-
-    return new NextResponse(Buffer.from(buffer), {
-      status: 200,
-      headers: {
-        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition": `attachment; filename="agenda_${ym}.xlsx"`
-      }
-    });
-
-  } catch (err) {
-    console.error(err);
-    return NextResponse.json({ error: "Erro ao exportar" }, { status: 500 });
+/**
+ * Exporta eventos do mês.
+ * Query params:
+ *  - year: 2026
+ *  - month: 1..12
+ * Opcional:
+ *  - medicoId: id do médico (se não enviar, exporta de todos)
+ */
+export async function GET(req: Request) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+
+  const { searchParams } = new URL(req.url);
+
+  const year = Number(searchParams.get("year"));
+  const month = Number(searchParams.get("month")); // 1..12
+  const medicoIdParam = searchParams.get("medicoId");
+
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+    return NextResponse.json(
+      { error: "Parâmetros inválidos. Use year=2026&month=1..12" },
+      { status: 400 }
+    );
+  }
+
+  const month0 = month - 1;
+  const start = new Date(year, month0, 1, 0, 0, 0, 0);
+  const end = new Date(year, month0 + 1, 1, 0, 0, 0, 0); // exclusivo
+
+  const where: any = {
+    data: { gte: start, lt: end }
+  };
+
+  if (medicoIdParam && medicoIdParam.trim() !== "") {
+    const medicoId = Number(medicoIdParam);
+    if (!Number.isFinite(medicoId)) {
+      return NextResponse.json({ error: "medicoId inválido" }, { status: 400 });
+    }
+    where.medicoId = medicoId;
+  }
+
+  const eventos = await prisma.eventoAgenda.findMany({
+    where,
+    orderBy: { data: "asc" },
+    select: {
+      id: true,
+      data: true,
+      descricao: true,
+      medicoId: true,
+      medico: { select: { nome: true, email: true, crm: true, perfil: true } }
+    }
+  });
+
+  return NextResponse.json({ eventos });
 }

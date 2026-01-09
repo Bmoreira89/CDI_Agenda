@@ -1,41 +1,45 @@
-import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient();
+import prisma from "@/lib/prisma";
 
-export type CalendarEvent = {
-  id?: string;
-  title: string;
-  start: string | Date;
-  end?: string | Date;
-  city?: string;
-  color?: string;
-  allDay?: boolean;
+type BuscarEventosParams = {
+  start: Date;
+  end: Date;
+  medicoId?: number; // opcional: filtra por médico
 };
 
-export async function listEventsInRange(start: Date, end: Date): Promise<CalendarEvent[]> {
+export async function buscarEventos({ start, end, medicoId }: BuscarEventosParams) {
   try {
-    console.log('📅 Buscando eventos de', start.toISOString(), 'a', end.toISOString());
-    const events = await prisma.event.findMany({
-      where: {
-        start: { gte: start },
-        end: { lte: end },
-      },
-      orderBy: { start: 'asc' },
+    console.log("📅 Buscando eventos de", start.toISOString(), "a", end.toISOString());
+
+    const where: any = {
+      data: { gte: start, lt: end } // end exclusivo para evitar duplicar no limite
+    };
+
+    if (typeof medicoId === "number" && Number.isFinite(medicoId)) {
+      where.medicoId = medicoId;
+    }
+
+    const eventos = await prisma.eventoAgenda.findMany({
+      where,
+      orderBy: { data: "asc" },
+      include: {
+        medico: {
+          select: { id: true, nome: true, email: true, crm: true, perfil: true }
+        }
+      }
     });
 
-    // Mapeia pro formato usado no calendário e no Excel
-    return events.map(ev => ({
+    // Normaliza para um formato comum (se o front espera "start/end", mapeamos)
+    return eventos.map((ev) => ({
       id: ev.id,
-      title: ev.title,
-      start: ev.start,
-      end: ev.end,
-      city: (ev as any).city || '',
-      color: (ev as any).color || '',
-      allDay: !!(ev as any).allDay,
+      start: ev.data,
+      end: ev.data, // seu schema não tem fim; mantemos igual ao start
+      title: ev.descricao,
+      descricao: ev.descricao,
+      medicoId: ev.medicoId,
+      medico: ev.medico
     }));
   } catch (err) {
-    console.error('❌ Erro ao buscar eventos:', err);
+    console.error("❌ Erro ao buscar eventos:", err);
     throw err;
-  } finally {
-    await prisma.$disconnect();
   }
 }

@@ -1,87 +1,58 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth/next'
-import { authOptions } from '@/lib/auth'
-import prisma from "@/lib/prisma"
-import * as XLSX from 'xlsx'
+import { NextResponse } from "next/server";
+import prisma from "@/lib/prisma";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 
 /**
- * GET /api/export/month?year=2025&month=10
- * - Se ADMIN: exporta todos os eventos do mês
- * - Se MÉDICO: exporta apenas os eventos do próprio usuário
- * Saída: arquivo .xlsx
+ * Exporta eventos por mês (JSON).
+ * Query params:
+ *  - year: 2026
+ *  - month: 1..12
+ * Opcional:
+ *  - medicoId: id do médico (se não enviar, exporta de todos)
  */
-export async function GET(req: NextRequest) {
-  // sessão como any para não travar o build por tipagem
-  const session: any = await getServerSession(authOptions as any)
-  if (!session?.user) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+export async function GET(req: Request) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const url = new URL(req.url)
-  const year = Number(url.searchParams.get('year')) || new Date().getFullYear()
-  const month = Number(url.searchParams.get('month')) || (new Date().getMonth() + 1)
+  const { searchParams } = new URL(req.url);
 
-  // janela [start, end) do mês
-  const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0))
-  const end = new Date(Date.UTC(year, month, 1, 0, 0, 0))
+  const year = Number(searchParams.get("year"));
+  const month = Number(searchParams.get("month")); // 1..12
+  const medicoIdParam = searchParams.get("medicoId");
 
-  const isAdmin = (session.user as any)?.role === 'ADMIN'
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+    return NextResponse.json(
+      { error: "Parâmetros inválidos. Use year=2026&month=1..12" },
+      { status: 400 }
+    );
+  }
 
-  // filtro: admin pega tudo; médico filtra por userId
+  const month0 = month - 1;
+  const start = new Date(year, month0, 1, 0, 0, 0, 0);
+  const end = new Date(year, month0 + 1, 1, 0, 0, 0, 0); // exclusivo
+
   const where: any = {
-    start: {
-      gte: start,
-      lt: end,
-    },
-  }
-  if (!isAdmin) {
-    where.userId = session.user.id
+    data: { gte: start, lt: end }
+  };
+
+  if (medicoIdParam && medicoIdParam.trim() !== "") {
+    const medicoId = Number(medicoIdParam);
+    if (!Number.isFinite(medicoId)) {
+      return NextResponse.json({ error: "medicoId inválido" }, { status: 400 });
+    }
+    where.medicoId = medicoId;
   }
 
-  const events = await prisma.event.findMany({
+  const eventos = await prisma.eventoAgenda.findMany({
     where,
-    orderBy: [{ start: 'asc' }],
+    orderBy: [{ data: "asc" }],
     include: {
-      user: { select: { name: true } },
-    },
-    take: 2000, // limite saudável pra export
-  })
+      medico: true
+    }
+  });
 
-  // monta planilha
-  // cabeçalho
-  const rows: any[] = [
-    ['Data', 'Cidade', 'Pacientes', 'Médico', 'Observação', 'Anexo'],
-  ]
-
-  for (const e of events) {
-    rows.push([
-      // ISO sem hora para ficar legível
-      new Date(e.start).toISOString().slice(0, 10),
-      e.origem ?? '',
-      e.examsQty ?? 0,
-      e.user?.name ?? '',
-      e.observacao ?? '',
-      e.attachmentUrl ? 'sim' : '-',
-    ])
-  }
-
-  const wb = XLSX.utils.book_new()
-  const ws = XLSX.utils.aoa_to_sheet(rows)
-  XLSX.utils.book_append_sheet(wb, ws, 'Eventos')
-
-  // escreve em Buffer e converte para Uint8Array (BodyInit aceito)
-  const buf: Buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as unknown as Buffer
-  const body = new Uint8Array(buf) // <- aqui está o pulo do gato
-
-  const ym = String(year) + '-' + String(month).padStart(2, '0')
-  const filename = `export_${ym}.xlsx`
-
-  return new NextResponse(body, {
-    status: 200,
-    headers: {
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'Content-Disposition': `attachment; filename="${filename}"`,
-      'Cache-Control': 'no-store',
-    },
-  })
+  return NextResponse.json({ eventos });
 }

@@ -1,74 +1,67 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth/next'
-import { authOptions } from '@/lib/auth'
-import prisma from "@/lib/prisma"
-import * as XLSX from 'xlsx'
+
+import { NextResponse } from "next/server";
+import prisma from "@/lib/prisma";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+
+function isAdmin(session: any) {
+  return (
+    session?.user?.perfil === "admin" ||
+    session?.user?.role === "ADMIN" ||
+    session?.user?.isAdmin === true
+  );
+}
 
 /**
- * GET /api/export?year=YYYY&month=MM
- * - Se ADMIN: exporta todos os eventos do mês
- * - Se MÉDICO: exporta apenas eventos do próprio usuário
- * Caso não informe year/month, usa o mês atual.
+ * Exporta eventos (JSON).
+ * Se for admin: exporta de todos.
+ * Se não for admin: exporta apenas do médico logado.
+ *
+ * Query params opcionais:
+ *  - from: ISO date (ex: 2026-01-01)
+ *  - to:   ISO date (ex: 2026-01-31)
  */
-export async function GET(req: NextRequest) {
-  // Tipagem relaxada para não travar o build
-  const session: any = await getServerSession(authOptions as any)
-  if (!session?.user) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+export async function GET(req: Request) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const url = new URL(req.url)
-  const now = new Date()
-  const year = Number(url.searchParams.get('year')) || now.getFullYear()
-  const month = Number(url.searchParams.get('month')) || (now.getMonth() + 1)
+  const { searchParams } = new URL(req.url);
+  const from = searchParams.get("from");
+  const to = searchParams.get("to");
 
-  // Janela do mês [start, end)
-  const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0))
-  const end = new Date(Date.UTC(year, month, 1, 0, 0, 0))
+  const where: any = {};
 
-  const isAdmin = (session.user as any)?.role === 'ADMIN'
+  // Filtro por intervalo (opcional)
+  if (from) {
+    const d = new Date(from);
+    if (!isNaN(d.getTime())) {
+      where.data = { ...(where.data ?? {}), gte: d };
+    }
+  }
 
-  const where: any = { start: { gte: start, lt: end } }
-  if (!isAdmin) where.userId = session.user.id
+  if (to) {
+    const d = new Date(to);
+    if (!isNaN(d.getTime())) {
+      where.data = { ...(where.data ?? {}), lte: d };
+    }
+  }
 
-  const events = await prisma.event.findMany({
+  // Se não for admin, limita ao médico logado
+  if (!isAdmin(session)) {
+    where.medicoId = Number(session.user.id);
+  }
+
+  const eventos = await prisma.eventoAgenda.findMany({
     where,
-    orderBy: [{ start: 'asc' }],
-    include: { user: { select: { name: true } } },
-    take: 2000,
-  })
+    orderBy: [{ data: "asc" }],
+    include: {
+      medico: {
+        select: { id: true, nome: true, email: true, crm: true, perfil: true }
+      }
+    }
+  });
 
-  const rows: any[] = [
-    ['Data', 'Cidade', 'Pacientes', 'Médico', 'Observação', 'Anexo'],
-  ]
-  for (const e of events) {
-    rows.push([
-      new Date(e.start).toISOString().slice(0, 10),
-      e.origem ?? '',
-      e.examsQty ?? 0,
-      e.user?.name ?? '',
-      e.observacao ?? '',
-      e.attachmentUrl ? 'sim' : '-',
-    ])
-  }
-
-  const wb = XLSX.utils.book_new()
-  const ws = XLSX.utils.aoa_to_sheet(rows)
-  XLSX.utils.book_append_sheet(wb, ws, 'Eventos')
-
-  // Gera Buffer e converte para Uint8Array (BodyInit aceito pelo NextResponse)
-  const buf: Buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as unknown as Buffer
-  const body = new Uint8Array(buf)
-
-  const ym = `${year}-${String(month).padStart(2, '0')}`
-  const filename = `export_${ym}.xlsx`
-
-  return new NextResponse(body, {
-    status: 200,
-    headers: {
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'Content-Disposition': `attachment; filename="${filename}"`,
-      'Cache-Control': 'no-store',
-    },
-  })
+  return NextResponse.json({ eventos });
 }
