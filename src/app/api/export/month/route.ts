@@ -1,57 +1,50 @@
+export const dynamic = "force-dynamic";
+
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
-/**
- * Exporta eventos por mês (JSON).
- * Query params:
- *  - year: 2026
- *  - month: 1..12
- * Opcional:
- *  - medicoId: id do médico (se não enviar, exporta de todos)
- */
 export async function GET(req: Request) {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+
+  if (!session) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const { searchParams } = new URL(req.url);
-
   const year = Number(searchParams.get("year"));
-  const month = Number(searchParams.get("month")); // 1..12
-  const medicoIdParam = searchParams.get("medicoId");
+  const month = Number(searchParams.get("month")); // 1–12
 
-  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+  if (!year || !month) {
     return NextResponse.json(
-      { error: "Parâmetros inválidos. Use year=2026&month=1..12" },
+      { error: "year e month são obrigatórios" },
       { status: 400 }
     );
   }
 
-  const month0 = month - 1;
-  const start = new Date(year, month0, 1, 0, 0, 0, 0);
-  const end = new Date(year, month0 + 1, 1, 0, 0, 0, 0); // exclusivo
+  const start = new Date(year, month - 1, 1, 0, 0, 0);
+  const end = new Date(year, month, 0, 23, 59, 59, 999);
 
-  const where: any = {
-    data: { gte: start, lt: end }
-  };
-
-  if (medicoIdParam && medicoIdParam.trim() !== "") {
-    const medicoId = Number(medicoIdParam);
-    if (!Number.isFinite(medicoId)) {
-      return NextResponse.json({ error: "medicoId inválido" }, { status: 400 });
-    }
-    where.medicoId = medicoId;
-  }
+  const isAdmin = session.user.perfil === "admin";
 
   const eventos = await prisma.eventoAgenda.findMany({
-    where,
-    orderBy: [{ data: "asc" }],
+    where: {
+      data: {
+        gte: start,
+        lte: end,
+      },
+      ...(isAdmin ? {} : { medicoId: session.user.id }),
+    },
+    orderBy: { data: "asc" },
     include: {
-      medico: true
-    }
+      medico: {
+        select: {
+          nome: true,
+          email: true,
+        },
+      },
+    },
   });
 
   return NextResponse.json({ eventos });
