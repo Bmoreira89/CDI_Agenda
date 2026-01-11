@@ -10,6 +10,10 @@ type SessionUser = {
   role?: string | null;
 };
 
+function isBuildPhase() {
+  return process.env.NEXT_PHASE === "phase-production-build";
+}
+
 function isAdmin(session: any) {
   const user = session?.user as SessionUser | undefined;
   const perfil = user?.perfil ?? user?.role;
@@ -17,39 +21,42 @@ function isAdmin(session: any) {
 }
 
 function getUserId(session: any): number | null {
-  const user = session?.user as SessionUser | undefined;
-  const id = user?.id;
+  const id = (session?.user as SessionUser | undefined)?.id;
   if (typeof id === "number") return id;
   if (typeof id === "string" && id.trim() !== "" && !Number.isNaN(Number(id))) return Number(id);
   return null;
 }
 
-function parseEventId(raw: string): number | null {
+function parseId(raw: string): number | null {
   const n = Number(raw);
-  if (!Number.isInteger(n) || n <= 0) return null;
-  return n;
+  return Number.isInteger(n) && n > 0 ? n : null;
 }
 
-function isBuildPhase() {
-  return process.env.NEXT_PHASE === "phase-production-build";
+async function getDeps() {
+  // IMPORTANTE: tudo dinâmico (nada top-level)
+  const [{ getServerSession }, authMod, prismaMod] = await Promise.all([
+    import("next-auth"),
+    import("@/lib/auth"),
+    import("@/lib/prisma"),
+  ]);
+
+  const prisma: any = (prismaMod as any).default ?? (prismaMod as any).prisma;
+  const authOptions: any = (authMod as any).authOptions ?? (authMod as any).default ?? authMod;
+
+  return { prisma, getServerSession, authOptions };
 }
 
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   try {
+    // impede o Next/Vercel de quebrar no build
     if (isBuildPhase()) return NextResponse.json({ ok: true, build: true });
 
-    const [{ getServerSession }, { authOptions }, prismaMod] = await Promise.all([
-      import("next-auth"),
-      import("@/lib/auth"),
-      import("@/lib/prisma"),
-    ]);
+    const { prisma, getServerSession, authOptions } = await getDeps();
 
-    const prisma: any = (prismaMod as any).default ?? (prismaMod as any).prisma;
-
-    const session = await getServerSession(authOptions as any);
+    const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-    const id = parseEventId(params.id);
+    const id = parseId(params.id);
     if (!id) return NextResponse.json({ error: "invalid_id" }, { status: 400 });
 
     const evento = await prisma.eventoAgenda.findUnique({
@@ -79,18 +86,12 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
   try {
     if (isBuildPhase()) return NextResponse.json({ ok: true, build: true });
 
-    const [{ getServerSession }, { authOptions }, prismaMod] = await Promise.all([
-      import("next-auth"),
-      import("@/lib/auth"),
-      import("@/lib/prisma"),
-    ]);
+    const { prisma, getServerSession, authOptions } = await getDeps();
 
-    const prisma: any = (prismaMod as any).default ?? (prismaMod as any).prisma;
-
-    const session = await getServerSession(authOptions as any);
+    const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-    const id = parseEventId(params.id);
+    const id = parseId(params.id);
     if (!id) return NextResponse.json({ error: "invalid_id" }, { status: 400 });
 
     const ev = await prisma.eventoAgenda.findUnique({
