@@ -1,62 +1,104 @@
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const revalidate = 0;
+
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+
+type SessionUser = {
+  id?: number | string;
+  perfil?: string | null;
+  role?: string | null;
+};
+
+function isBuildPhase() {
+  return process.env.NEXT_PHASE === "phase-production-build";
+}
+
+function isAdmin(session: any) {
+  const user = session?.user as SessionUser | undefined;
+  const perfil = user?.perfil ?? user?.role;
+  return perfil === "admin" || perfil === "ADMIN";
+}
+
+function getUserId(session: any): number | null {
+  const id = (session?.user as SessionUser | undefined)?.id;
+  if (typeof id === "number") return id;
+  if (typeof id === "string" && id.trim() !== "" && !Number.isNaN(Number(id))) return Number(id);
+  return null;
+}
+
+async function getDeps() {
+  const [{ getServerSession }, authMod, prismaMod] = await Promise.all([
+    import("next-auth"),
+    import("@/lib/auth"),
+    import("@/lib/prisma"),
+  ]);
+
+  const prisma: any = (prismaMod as any).default ?? (prismaMod as any).prisma;
+  const authOptions: any = (authMod as any).authOptions ?? (authMod as any).default ?? authMod;
+
+  return { prisma, getServerSession, authOptions };
+}
 
 /**
- * Exporta eventos do mês.
- * Query params:
- *  - year: 2026
- *  - month: 1..12
- * Opcional:
- *  - medicoId: id do médico (se não enviar, exporta de todos)
+ * GET /api/eventos/export?month=MM&year=YYYY
+ * - Admin: exporta tudo
+ * - Médico: exporta só os próprios eventos
  */
 export async function GET(req: Request) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  try {
+    // impede quebra no build da Vercel
+    if (isBuildPhase()) return NextResponse.json({ ok: true, build: true });
 
-  const { searchParams } = new URL(req.url);
+    const { prisma, getServerSession, authOptions } = await getDeps();
 
-  const year = Number(searchParams.get("year"));
-  const month = Number(searchParams.get("month")); // 1..12
-  const medicoIdParam = searchParams.get("medicoId");
+    const session = await getServerSession(authOptions);
+    if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+    const url = new URL(req.url);
+    const monthStr = url.searchParams.get("month") || "";
+    const yearStr = url.searchParams.get("year") || "";
+
+    const month = Number(monthStr);
+    const year = Number(yearStr);
+
+    if (!Number.isInteger(month) || month < 1 || month > 12) {
+      return NextResponse.json({ error: "invalid_month" }, { status: 400 });
+    }
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      return NextResponse.json({ error: "invalid_year" }, { status: 400 });
+    }
+
+    const start = new Date(year, month - 1, 1, 0, 0, 0, 0);
+    const end = new Date(year, month, 0, 23, 59, 59, 999);
+
+    const where: any = {
+      data: { gte: start, lte: end },
+    };
+
+    if (!isAdmin(session)) {
+      const userId = getUserId(session);
+      if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+      where.medicoId = userId;
+    }
+
+    const eventos = await prisma.eventoAgenda.findMany({
+      where,
+      orderBy: { data: "asc" },
+      include: { medico: { select: { id: true, nome: true, email: true } } },
+    });
+
+    // Retorna JSON (simples e compatível). Se você quiser Excel depois, a gente troca para exceljs.
+    return NextResponse.json({
+      month,
+      year,
+      total: eventos.length,
+      eventos,
+    });
+  } catch (e: any) {
     return NextResponse.json(
-      { error: "Parâmetros inválidos. Use year=2026&month=1..12" },
-      { status: 400 }
+      { error: "internal_error", details: e?.message ?? String(e) },
+      { status: 500 }
     );
   }
-
-  const month0 = month - 1;
-  const start = new Date(year, month0, 1, 0, 0, 0, 0);
-  const end = new Date(year, month0 + 1, 1, 0, 0, 0, 0); // exclusivo
-
-  const where: any = {
-    data: { gte: start, lt: end }
-  };
-
-  if (medicoIdParam && medicoIdParam.trim() !== "") {
-    const medicoId = Number(medicoIdParam);
-    if (!Number.isFinite(medicoId)) {
-      return NextResponse.json({ error: "medicoId inválido" }, { status: 400 });
-    }
-    where.medicoId = medicoId;
-  }
-
-  const eventos = await prisma.eventoAgenda.findMany({
-    where,
-    orderBy: { data: "asc" },
-    select: {
-      id: true,
-      data: true,
-      descricao: true,
-      medicoId: true,
-      medico: { select: { nome: true, email: true, crm: true, perfil: true } }
-    }
-  });
-
-  return NextResponse.json({ eventos });
 }
