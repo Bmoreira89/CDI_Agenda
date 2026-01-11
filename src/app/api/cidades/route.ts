@@ -1,21 +1,31 @@
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const revalidate = 0;
 
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
+
+function isBuild() {
+  return process.env.NEXT_PHASE === "phase-production-build";
+}
+
+async function getDeps() {
+  const prismaMod = await import("@/lib/prisma");
+  return {
+    prisma: prismaMod.default ?? (prismaMod as any).prisma,
+  };
+}
 
 export async function GET() {
-  try {
-    const cidades = await prisma.cidadeAgenda.findMany({
-      orderBy: { nome: "asc" },
-      select: { id: true, nome: true },
-    });
-
-    return NextResponse.json({ cidades });
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: "internal_error", details: e?.message ?? String(e) },
-      { status: 500 }
-    );
+  // 🧱 BLINDA TOTAL CONTRA BUILD DA VERCEL
+  if (isBuild()) {
+    return NextResponse.json({ ok: true });
   }
+
+  const { prisma } = await getDeps();
+
+  const cidades = await prisma.cidadeAgenda.findMany({
+    orderBy: { nome: "asc" },
+  });
+
+  return NextResponse.json({ cidades });
 }
