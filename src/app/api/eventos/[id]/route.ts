@@ -20,9 +20,7 @@ function getUserId(session: any): number | null {
   const user = session?.user as SessionUser | undefined;
   const id = user?.id;
   if (typeof id === "number") return id;
-  if (typeof id === "string" && id.trim() !== "" && !Number.isNaN(Number(id))) {
-    return Number(id);
-  }
+  if (typeof id === "string" && id.trim() !== "" && !Number.isNaN(Number(id))) return Number(id);
   return null;
 }
 
@@ -32,24 +30,13 @@ function parseEventId(raw: string): number | null {
   return n;
 }
 
-/**
- * VERCEL/Next build guard:
- * Durante o "Collecting page data" a Vercel pode tentar avaliar handlers.
- * A gente evita tocar em NextAuth/Prisma no build para não derrubar o deploy.
- */
 function isBuildPhase() {
   return process.env.NEXT_PHASE === "phase-production-build";
 }
 
-// GET /api/eventos/[id]
-export async function GET(
-  _req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function GET(_req: Request, { params }: { params: { id: string } }) {
   try {
-    if (isBuildPhase()) {
-      return NextResponse.json({ ok: true, build: true });
-    }
+    if (isBuildPhase()) return NextResponse.json({ ok: true, build: true });
 
     const [{ getServerSession }, { authOptions }, prismaMod] = await Promise.all([
       import("next-auth"),
@@ -88,15 +75,9 @@ export async function GET(
   }
 }
 
-// DELETE /api/eventos/[id]
-export async function DELETE(
-  _req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
   try {
-    if (isBuildPhase()) {
-      return NextResponse.json({ ok: true, build: true });
-    }
+    if (isBuildPhase()) return NextResponse.json({ ok: true, build: true });
 
     const [{ getServerSession }, { authOptions }, prismaMod] = await Promise.all([
       import("next-auth"),
