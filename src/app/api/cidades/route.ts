@@ -1,31 +1,26 @@
+// src/app/api/cidades/route.ts
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-export const revalidate = 0;
 
 import { NextResponse } from "next/server";
-
-function isBuild() {
-  return process.env.NEXT_PHASE === "phase-production-build";
-}
-
-async function getDeps() {
-  const prismaMod = await import("@/lib/prisma");
-  return {
-    prisma: prismaMod.default ?? (prismaMod as any).prisma,
-  };
-}
+import prisma from "@/lib/prisma";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 
 export async function GET() {
-  // 🧱 BLINDA TOTAL CONTRA BUILD DA VERCEL
-  if (isBuild()) {
-    return NextResponse.json({ ok: true });
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+    const cidades = await prisma.cidadeAgenda.findMany({
+      orderBy: { nome: "asc" },
+    });
+
+    return NextResponse.json({ cidades });
+  } catch (e: any) {
+    return NextResponse.json(
+      { error: "internal_error", details: e?.message ?? String(e) },
+      { status: 500 }
+    );
   }
-
-  const { prisma } = await getDeps();
-
-  const cidades = await prisma.cidadeAgenda.findMany({
-    orderBy: { nome: "asc" },
-  });
-
-  return NextResponse.json({ cidades });
 }
