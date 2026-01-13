@@ -7,8 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "prisma:generate": "prisma generate",
     "prisma:migrate-deploy": "prisma migrate deploy",
-    "vercel-build": "npm run prisma:migrate-deploy && next build"
+    "vercel-build": "npm run prisma:generate && npm run prisma:migrate-deploy && next build"
   },
   "prisma": {
     "seed": "node prisma/seed.cjs"

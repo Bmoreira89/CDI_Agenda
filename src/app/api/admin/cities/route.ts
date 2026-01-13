@@ -1,40 +1,37 @@
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-export const revalidate = 0;
 
 import { NextResponse } from "next/server";
+import prisma from "@/lib/prisma";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 
-function isBuild() {
-  return process.env.NEXT_PHASE === "phase-production-build";
-}
+type SessionUser = {
+  id?: number | string;
+  role?: "ADMIN" | "MEDICO" | string;
+};
 
-async function deps() {
-  const [authMod, nextAuthMod, prismaMod] = await Promise.all([
-    import("@/lib/auth"),
-    import("next-auth"),
-    import("@/lib/prisma"),
-  ]);
-
-  return {
-    authOptions: (authMod as any).authOptions,
-    getServerSession: (nextAuthMod as any).getServerSession,
-    prisma: (prismaMod as any).default ?? (prismaMod as any).prisma,
-  };
+function isAdmin(session: any) {
+  const user = session?.user as SessionUser | undefined;
+  return user?.role === "ADMIN" || user?.role === "admin";
 }
 
 export async function GET() {
-  if (isBuild()) return NextResponse.json({ ok: true });
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user || !isAdmin(session)) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
 
-  const { authOptions, getServerSession, prisma } = await deps();
-  const session = await getServerSession(authOptions);
+    const cidades = await prisma.cidade.findMany({
+      orderBy: { nome: "asc" }
+    });
 
-  if (!session?.user || session.user.role !== "ADMIN") {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    return NextResponse.json({ cidades });
+  } catch (e: any) {
+    return NextResponse.json(
+      { error: "internal_error", details: e?.message ?? String(e) },
+      { status: 500 }
+    );
   }
-
-  const cidades = await prisma.cidadeAgenda.findMany({
-    orderBy: { nome: "asc" },
-  });
-
-  return NextResponse.json({ cidades });
 }
