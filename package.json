@@ -2,16 +2,20 @@
   "name": "cdi-agenda",
   "version": "0.1.0",
   "private": true,
+{
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+
     "prisma:generate": "prisma generate",
     "prisma:migrate-deploy": "prisma migrate deploy",
+
     "vercel-build": "npm run prisma:generate && npm run prisma:migrate-deploy && next build",
     "postinstall": "prisma generate"
-  },
+  }
+}
+
   "dependencies": {
     "@fullcalendar/core": "^6.1.20",
     "@fullcalendar/daygrid": "^6.1.20",
