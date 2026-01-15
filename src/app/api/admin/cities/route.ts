@@ -1,36 +1,45 @@
-// src/app/api/admin/cities/route.ts
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import prisma from "@/lib/prisma";
 
 type SessionUser = {
-  id?: number | string;
+  id?: string | number;
+  role?: string;
   perfil?: string | null;
-  role?: string | null;
 };
+
+function norm(v: unknown) {
+  return String(v ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
 
 function isAdmin(session: any) {
   const user = session?.user as SessionUser | undefined;
-  const perfil = (user?.perfil ?? user?.role ?? "").toString().toLowerCase();
-  return perfil === "admin";
+  const p = norm(user?.perfil ?? user?.role);
+  return p === "admin" || p.includes("admin");
 }
 
-// GET /api/admin/cities
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
-    if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-    if (!isAdmin(session)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+
+    if (!session?.user || !isAdmin(session)) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
 
     const cidades = await prisma.cidadeAgenda.findMany({
       orderBy: { nome: "asc" },
+      select: { id: true, nome: true },
     });
 
-    return NextResponse.json({ cidades });
+    return NextResponse.json(cidades);
   } catch (e: any) {
     return NextResponse.json(
       { error: "internal_error", details: e?.message ?? String(e) },
@@ -39,51 +48,33 @@ export async function GET() {
   }
 }
 
-// POST /api/admin/cities
 export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-    if (!isAdmin(session)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
-    const body = await req.json().catch(() => ({}));
-    const nome = (body?.nome ?? "").toString().trim();
-
-    if (!nome) return NextResponse.json({ error: "nome_obrigatorio" }, { status: 400 });
-
-    const cidade = await prisma.cidadeAgenda.create({
-      data: { nome },
-    });
-
-    return NextResponse.json({ cidade }, { status: 201 });
-  } catch (e: any) {
-    // erro de unique constraint costuma cair aqui se repetir nome
-    return NextResponse.json(
-      { error: "internal_error", details: e?.message ?? String(e) },
-      { status: 500 }
-    );
-  }
-}
-
-// DELETE /api/admin/cities?id=123
-export async function DELETE(req: Request) {
-  try {
-    const session = await getServerSession(authOptions);
-    if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-    if (!isAdmin(session)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
-
-    const { searchParams } = new URL(req.url);
-    const rawId = searchParams.get("id");
-    const id = rawId ? Number(rawId) : NaN;
-
-    if (!Number.isInteger(id) || id <= 0) {
-      return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+    if (!session?.user || !isAdmin(session)) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
 
-    await prisma.cidadeAgenda.delete({ where: { id } });
+    const body = await req.json().catch(() => ({}));
+    const nome = String(body?.nome ?? "").trim();
 
-    return NextResponse.json({ ok: true });
+    if (!nome) {
+      return NextResponse.json({ error: "nome_obrigatorio" }, { status: 400 });
+    }
+
+    const nova = await prisma.cidadeAgenda.create({
+      data: { nome },
+      select: { id: true, nome: true },
+    });
+
+    return NextResponse.json(nova);
   } catch (e: any) {
+    // conflito de unique (cidade repetida)
+    if (String(e?.code ?? "").toUpperCase() === "P2002") {
+      return NextResponse.json({ error: "cidade_ja_existe" }, { status: 409 });
+    }
+
     return NextResponse.json(
       { error: "internal_error", details: e?.message ?? String(e) },
       { status: 500 }

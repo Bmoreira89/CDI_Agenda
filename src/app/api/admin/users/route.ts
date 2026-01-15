@@ -8,14 +8,23 @@ import prisma from "@/lib/prisma";
 
 type SessionUser = {
   id?: string | number;
-  role?: "ADMIN" | "MEDICO" | string;
-  perfil?: string | null; // pode existir no runtime, mas não no type do NextAuth
+  role?: string;
+  perfil?: string | null;
 };
+
+function norm(v: unknown) {
+  return String(v ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
 
 function isAdmin(session: any) {
   const user = session?.user as SessionUser | undefined;
-  const role = (user?.perfil ?? user?.role ?? "").toString();
-  return role.toUpperCase() === "ADMIN" || role.toLowerCase() === "admin";
+  const p = norm(user?.perfil ?? user?.role);
+  // aceita: admin, ADMIN, administração, administracao, etc.
+  return p === "admin" || p.includes("admin");
 }
 
 export async function GET() {
@@ -38,7 +47,7 @@ export async function GET() {
       },
     });
 
-    return NextResponse.json({ users });
+    return NextResponse.json(users);
   } catch (e: any) {
     return NextResponse.json(
       { error: "internal_error", details: e?.message ?? String(e) },
