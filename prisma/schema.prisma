@@ -1,4 +1,4 @@
-﻿datasource db {
+datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
@@ -13,7 +13,7 @@ model MedicoAgenda {
   crm       String?
   email     String        @unique
   senha     String?
-  perfil    String        // "medico" ou "admin"
+  perfil    String
   createdAt DateTime      @default(now())
 
   eventos   EventoAgenda[]
