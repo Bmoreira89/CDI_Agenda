@@ -17,7 +17,6 @@ model User {
   createdAt DateTime @default(now())
 
   eventos   Evento[]
-  logs      LogAcao[]
 }
 
 model Cidade {
@@ -30,18 +29,10 @@ model Evento {
   date       DateTime
   cidade     String
   quantidade Int
+
   medicoId   Int
   medicoNome String
 
   medico     User     @relation(fields: [medicoId], references: [id])
   createdAt  DateTime @default(now())
-}
-
-model LogAcao {
-  id        Int      @id @default(autoincrement())
-  usuarioId Int?
-  usuario   User?    @relation(fields: [usuarioId], references: [id])
-  acao      String
-  detalhes  String?
-  dataHora  DateTime @default(now())
 }
