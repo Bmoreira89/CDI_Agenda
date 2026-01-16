@@ -7,31 +7,21 @@ import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 
 type SessionUser = {
-  id?: string | number;
-  role?: string;
   perfil?: string | null;
+  role?: string | null;
 };
-
-function norm(v: unknown) {
-  return String(v ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim()
-    .toLowerCase();
-}
 
 function isAdmin(session: any) {
   const user = session?.user as SessionUser | undefined;
-  const p = norm(user?.perfil ?? user?.role);
-  return p === "admin" || p.includes("admin");
+  const role = (user?.perfil ?? user?.role ?? "").toString().toLowerCase();
+  return role === "admin";
 }
 
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
-
     if (!session?.user || !isAdmin(session)) {
-      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
 
     const cidades = await prisma.cidadeAgenda.findMany({
@@ -39,7 +29,7 @@ export async function GET() {
       select: { id: true, nome: true },
     });
 
-    return NextResponse.json(cidades);
+    return NextResponse.json({ cidades });
   } catch (e: any) {
     return NextResponse.json(
       { error: "internal_error", details: e?.message ?? String(e) },
@@ -51,32 +41,33 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
-
     if (!session?.user || !isAdmin(session)) {
-      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
 
     const body = await req.json().catch(() => ({}));
     const nome = String(body?.nome ?? "").trim();
 
     if (!nome) {
-      return NextResponse.json({ error: "nome_obrigatorio" }, { status: 400 });
+      return NextResponse.json({ error: "Nome é obrigatório." }, { status: 400 });
     }
 
-    const nova = await prisma.cidadeAgenda.create({
+    const created = await prisma.cidadeAgenda.create({
       data: { nome },
       select: { id: true, nome: true },
     });
 
-    return NextResponse.json(nova);
+    return NextResponse.json(created, { status: 201 });
   } catch (e: any) {
-    // conflito de unique (cidade repetida)
-    if (String(e?.code ?? "").toUpperCase() === "P2002") {
-      return NextResponse.json({ error: "cidade_ja_existe" }, { status: 409 });
+    const msg = e?.message ?? String(e);
+
+    // Unique constraint (cidade já existe)
+    if (msg.toLowerCase().includes("unique") || msg.toLowerCase().includes("p2002")) {
+      return NextResponse.json({ error: "Cidade/local já existe." }, { status: 409 });
     }
 
     return NextResponse.json(
-      { error: "internal_error", details: e?.message ?? String(e) },
+      { error: "internal_error", details: msg },
       { status: 500 }
     );
   }

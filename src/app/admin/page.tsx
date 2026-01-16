@@ -56,7 +56,7 @@ export default function AdminPage() {
     try {
       setLoadingCidades(true);
       setErroCidades("");
-      const res = await fetch("/api/cidades");
+      const res = await fetch("/api/admin/cities");
       if (!res.ok) throw new Error("Erro ao carregar cidades");
       const data: Cidade[] = await res.json();
       setCidades(data);
@@ -72,7 +72,7 @@ export default function AdminPage() {
     try {
       setLoadingMedicos(true);
       setErroMedicos("");
-      const res = await fetch("/api/medicos");
+      const res = await fetch("/api/admin/users");
       if (!res.ok) throw new Error("Erro ao carregar médicos");
       const data: Medico[] = await res.json();
       setMedicos(data);
