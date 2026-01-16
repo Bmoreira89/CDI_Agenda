@@ -1,4 +1,4 @@
-export const dynamic = "force-dynamic";
+﻿export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const revalidate = 0;
 
@@ -50,7 +50,7 @@ async function getDeps() {
 /**
  * GET /api/medicos
  * - Admin: lista todos
- * - Não-admin: retorna apenas o próprio usuário
+ * - NÃ£o-admin: retorna apenas o prÃ³prio usuÃ¡rio
  */
 export async function GET() {
   try {
@@ -68,7 +68,7 @@ export async function GET() {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
 
-    const medicos = await prisma.medicoAgenda.findMany({
+    const medicos = await prisma.user.findMany({
       where: admin ? undefined : { id: userId },
       orderBy: { nome: "asc" },
       select: {
@@ -92,7 +92,7 @@ export async function GET() {
 
 /**
  * POST /api/medicos
- * Cria médico (admin only)
+ * Cria mÃ©dico (admin only)
  * Body: { nome, email, crm?, perfil?, senha? }
  */
 export async function POST(req: Request) {
@@ -120,7 +120,7 @@ export async function POST(req: Request) {
       senhaHash = await bcrypt.hash(senha, 10);
     }
 
-    const medico = await prisma.medicoAgenda.create({
+    const medico = await prisma.user.create({
       data: {
         nome,
         email,
@@ -140,10 +140,11 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ medico }, { status: 201 });
   } catch (e: any) {
-    // Prisma duplicate email costuma vir como erro conhecido, mas aqui a gente só retorna mensagem segura
+    // Prisma duplicate email costuma vir como erro conhecido, mas aqui a gente sÃ³ retorna mensagem segura
     return NextResponse.json(
       { error: "internal_error", details: e?.message ?? String(e) },
       { status: 500 }
     );
   }
 }
+

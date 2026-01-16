@@ -1,444 +1,167 @@
-"use client";
+﻿"use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-interface Cidade {
-  id: number;
-  nome: string;
-}
-
-type PerfilTipo = "medico" | "admin";
-
-interface Medico {
-  id: number;
-  nome: string;
-  crm?: string | null;
-  email?: string | null;
-  perfil: PerfilTipo;
-}
-
-type Permissoes = Record<string, string[]>;
+type Cidade = { id: number; nome: string };
+type User = { id: number; nome: string; email: string; perfil: "admin" | "medico"; crm?: string | null };
 
 export default function AdminPage() {
+  const [token, setToken] = useState<string>("");
   const [cidades, setCidades] = useState<Cidade[]>([]);
-  const [medicos, setMedicos] = useState<Medico[]>([]);
-  const [permissoes, setPermissoes] = useState<Permissoes>({});
-  const [cidadeNome, setCidadeNome] = useState("");
-  const [medicoNome, setMedicoNome] = useState("");
-  const [medicoCrm, setMedicoCrm] = useState("");
-  const [medicoEmail, setMedicoEmail] = useState("");
-  const [medicoSenha, setMedicoSenha] = useState("");
-  const [medicoPerfil, setMedicoPerfil] = useState<PerfilTipo>("medico");
-  const [medicoSelecionado, setMedicoSelecionado] = useState("");
+  const [users, setUsers] = useState<User[]>([]);
+  const [erroCidades, setErroCidades] = useState<string>("");
+  const [erroUsers, setErroUsers] = useState<string>("");
 
-  const [loadingMedicos, setLoadingMedicos] = useState(false);
-  const [erroMedicos, setErroMedicos] = useState("");
-  const [loadingCidades, setLoadingCidades] = useState(false);
-  const [erroCidades, setErroCidades] = useState("");
+  const headers = useMemo(() => ({
+    "Content-Type": "application/json",
+    "x-admin-token": token || "",
+  }), [token]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const storedPerm = localStorage.getItem("agenda_cdi_permissoes");
-    if (storedPerm) {
-      try {
-        setPermissoes(JSON.parse(storedPerm));
-      } catch {
-        setPermissoes({});
-      }
-    }
-
-    carregarCidades();
-    carregarMedicos();
+    const t = localStorage.getItem("agenda_cdi_admin_token") || "CDI_ADMIN_123";
+    setToken(t);
   }, []);
 
-  const carregarCidades = async () => {
+  const carregar = async () => {
+    setErroCidades("");
+    setErroUsers("");
+
     try {
-      setLoadingCidades(true);
-      setErroCidades("");
-      const res = await fetch("/api/admin/cities");
-      if (!res.ok) throw new Error("Erro ao carregar cidades");
-      const data: Cidade[] = await res.json();
-      setCidades(data);
-    } catch (err: any) {
-      console.error(err);
-      setErroCidades("Não foi possível carregar a lista de cidades/locais.");
-    } finally {
-      setLoadingCidades(false);
+      const r1 = await fetch("/api/admin/cities", { headers, cache: "no-store" });
+      if (!r1.ok) throw new Error("Erro ao comunicar com o servidor (cidades).");
+      setCidades(await r1.json());
+    } catch (e: any) {
+      setErroCidades(e?.message ?? "Falha ao carregar cidades.");
+      setCidades([]);
     }
-  };
 
-  const carregarMedicos = async () => {
     try {
-      setLoadingMedicos(true);
-      setErroMedicos("");
-      const res = await fetch("/api/admin/users");
-      if (!res.ok) throw new Error("Erro ao carregar médicos");
-      const data: Medico[] = await res.json();
-      setMedicos(data);
-    } catch (err: any) {
-      console.error(err);
-      setErroMedicos("Não foi possível carregar a lista de médicos.");
-    } finally {
-      setLoadingMedicos(false);
+      const r2 = await fetch("/api/admin/users", { headers, cache: "no-store" });
+      if (!r2.ok) throw new Error("Erro ao comunicar com o servidor (médicos).");
+      setUsers(await r2.json());
+    } catch (e: any) {
+      setErroUsers(e?.message ?? "Falha ao carregar médicos.");
+      setUsers([]);
     }
   };
 
-  const salvarPermissoesLocal = (obj: Permissoes) => {
-    setPermissoes(obj);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("agenda_cdi_permissoes", JSON.stringify(obj));
-    }
-  };
+  useEffect(() => {
+    if (token) carregar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
-  const handleSalvarPermissoesClick = () => {
-    try {
-      salvarPermissoesLocal(permissoes);
-      alert("Permissões salvas neste computador!");
-    } catch (error) {
-      console.error(error);
-      alert("Erro ao salvar as permissões.");
-    }
-  };
-
-  const handleAdicionarCidade = async () => {
-    const nome = cidadeNome.trim();
+  const [novaCidade, setNovaCidade] = useState("");
+  const addCidade = async () => {
+    const nome = novaCidade.trim();
     if (!nome) return;
-
-    try {
-      const res = await fetch("/api/cidades", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nome }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        alert(data.error || "Erro ao criar cidade/local.");
-        return;
-      }
-
-      setCidades((prev) => [...prev, data]);
-      setCidadeNome("");
-    } catch (error) {
-      console.error(error);
-      alert("Erro ao comunicar com o servidor (cidades).");
-    }
-  };
-
-  const handleAdicionarMedico = async () => {
-    const nome = medicoNome.trim();
-    const email = medicoEmail.trim();
-    const senha = medicoSenha.trim();
-
-    if (!nome || !email || !senha) {
-      alert("Nome, e-mail e senha são obrigatórios.");
+    const r = await fetch("/api/admin/cities", { method: "POST", headers, body: JSON.stringify({ nome }) });
+    if (!r.ok) {
+      alert("Não foi possível adicionar cidade.");
       return;
     }
-
-    try {
-      const res = await fetch("/api/medicos", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          nome,
-          crm: medicoCrm.trim() || null,
-          email,
-          senha,
-          perfil: medicoPerfil,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        alert(data.error || "Erro ao criar médico.");
-        return;
-      }
-
-      setMedicos((prev) => [
-        ...prev,
-        {
-          id: data.id,
-          nome: data.nome,
-          email: data.email,
-          perfil: data.perfil as PerfilTipo,
-          crm: data.crm,
-        },
-      ]);
-
-      setMedicoNome("");
-      setMedicoCrm("");
-      setMedicoEmail("");
-      setMedicoSenha("");
-      setMedicoPerfil("medico");
-    } catch (error) {
-      console.error(error);
-      alert("Erro ao comunicar com o servidor (médicos).");
-    }
+    setNovaCidade("");
+    carregar();
   };
 
-  const togglePermissao = (medicoId: string, cidadeNome: string) => {
-    const atual = permissoes[medicoId] || [];
-    let atualizado: string[];
+  const [nome, setNome] = useState("");
+  const [crm, setCrm] = useState("");
+  const [email, setEmail] = useState("");
+  const [senha, setSenha] = useState("");
+  const [perfil, setPerfil] = useState<"admin"|"medico">("medico");
 
-    if (atual.includes(cidadeNome)) {
-      atualizado = atual.filter((c) => c !== cidadeNome);
-    } else {
-      atualizado = [...atual, cidadeNome];
+  const addUser = async () => {
+    const payload = { nome: nome.trim(), crm: crm.trim() || null, email: email.trim(), senha: senha.trim(), perfil };
+    const r = await fetch("/api/admin/users", { method: "POST", headers, body: JSON.stringify(payload) });
+    if (!r.ok) {
+      alert("Não foi possível adicionar médico/usuário.");
+      return;
     }
-
-    const novoObj: Permissoes = {
-      ...permissoes,
-      [medicoId]: atualizado,
-    };
-
-    salvarPermissoesLocal(novoObj);
-  };
-
-  const handleRedefinirSenha = async (medico: Medico) => {
-    const nova = prompt(`Nova senha para ${medico.nome}:`);
-    if (!nova) return;
-
-    try {
-      const res = await fetch("/api/medicos/reset-password", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ medicoId: medico.id, novaSenha: nova }),
-      });
-
-      if (!res.ok) {
-        alert("Erro ao redefinir senha.");
-        return;
-      }
-
-      alert("Senha redefinida com sucesso!");
-    } catch (error) {
-      console.error(error);
-      alert("Erro ao comunicar com o servidor (redefinição de senha).");
-    }
+    setNome(""); setCrm(""); setEmail(""); setSenha(""); setPerfil("medico");
+    carregar();
   };
 
   return (
-    <main className="min-h-screen bg-slate-50 p-6">
-      <div className="max-w-6xl mx-auto space-y-4">
-        <header className="space-y-1">
-          <h1 className="text-2xl font-semibold">Painel do administrador</h1>
-          <p className="text-sm text-slate-500">
-            Cadastre cidades/locais, médicos (no banco) e quais locais cada
-            médico pode agendar exames.
-          </p>
-        </header>
+    <div style={{ padding: 24 }}>
+      <h1 style={{ fontSize: 28, fontWeight: 700 }}>Painel do administrador</h1>
+      <p style={{ marginTop: 6, opacity: 0.8 }}>
+        Cadastre cidades/locais, médicos (no banco) e depois use o calendário para lançar os exames.
+      </p>
 
-        <section className="grid gap-4 md:grid-cols-2">
-          {/* Cidades */}
-          <div className="bg-white rounded-xl shadow-sm p-4 space-y-3 text-sm">
-            <h2 className="text-base font-semibold">Cidades / Locais</h2>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={cidadeNome}
-                onChange={(e) => setCidadeNome(e.target.value)}
-                placeholder="Ex: São Manuel - TC"
-                className="flex-1 rounded-md border border-slate-300 px-3 py-2"
-              />
-              <button
-                onClick={handleAdicionarCidade}
-                className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800"
-              >
-                Adicionar
-              </button>
-            </div>
+      <div style={{ marginTop: 16, display: "flex", gap: 12, alignItems: "center" }}>
+        <label style={{ fontWeight: 600 }}>Token admin:</label>
+        <input
+          value={token}
+          onChange={(e) => {
+            setToken(e.target.value);
+            localStorage.setItem("agenda_cdi_admin_token", e.target.value);
+          }}
+          style={{ width: 260, padding: 8, border: "1px solid #ccc", borderRadius: 8 }}
+        />
+        <button onClick={carregar} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #333" }}>
+          Recarregar
+        </button>
+      </div>
 
-            {loadingCidades && (
-              <p className="text-xs text-slate-500 mt-1">
-                Carregando cidades...
-              </p>
-            )}
-            {erroCidades && (
-              <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-2 py-1 mt-1">
-                {erroCidades}
-              </p>
-            )}
+      <div style={{ marginTop: 20, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div style={{ border: "1px solid #e5e5e5", borderRadius: 12, padding: 16 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 700 }}>Cidades / Locais</h2>
 
-            <ul className="space-y-1 mt-1">
-              {cidades.length === 0 && !loadingCidades && (
-                <li className="text-slate-500">
-                  Nenhuma cidade cadastrada ainda.
-                </li>
-              )}
-              {cidades.map((c) => (
-                <li key={c.id}>• {c.nome}</li>
-              ))}
-            </ul>
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <input
+              placeholder="Ex: São Manuel - TC"
+              value={novaCidade}
+              onChange={(e) => setNovaCidade(e.target.value)}
+              style={{ flex: 1, padding: 10, border: "1px solid #ccc", borderRadius: 8 }}
+            />
+            <button onClick={addCidade} style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #333" }}>
+              Adicionar
+            </button>
           </div>
 
-          {/* Médicos */}
-          <div className="bg-white rounded-xl shadow-sm p-4 space-y-3 text-sm">
-            <h2 className="text-base font-semibold">Médicos (banco)</h2>
+          {erroCidades ? (
+            <div style={{ marginTop: 10, color: "crimson" }}>{erroCidades}</div>
+          ) : (
+            <ul style={{ marginTop: 10 }}>
+              {cidades.map((c) => <li key={c.id}>{c.nome}</li>)}
+              {cidades.length === 0 && <li style={{ opacity: 0.7 }}>Nenhuma cidade cadastrada ainda.</li>}
+            </ul>
+          )}
+        </div>
 
-            <input
-              type="text"
-              value={medicoNome}
-              onChange={(e) => setMedicoNome(e.target.value)}
-              placeholder="Nome do médico"
-              className="w-full rounded-md border border-slate-300 px-3 py-2"
-            />
-            <input
-              type="text"
-              value={medicoCrm}
-              onChange={(e) => setMedicoCrm(e.target.value)}
-              placeholder="CRM (opcional)"
-              className="w-full rounded-md border border-slate-300 px-3 py-2"
-            />
-            <input
-              type="email"
-              value={medicoEmail}
-              onChange={(e) => setMedicoEmail(e.target.value)}
-              placeholder="E-mail de login"
-              className="w-full rounded-md border border-slate-300 px-3 py-2"
-            />
-            <input
-              type="password"
-              value={medicoSenha}
-              onChange={(e) => setMedicoSenha(e.target.value)}
-              placeholder="Senha de acesso"
-              className="w-full rounded-md border border-slate-300 px-3 py-2"
-            />
+        <div style={{ border: "1px solid #e5e5e5", borderRadius: 12, padding: 16 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 700 }}>Médicos (banco)</h2>
 
-            <div className="space-y-1">
-              <label className="block text-slate-600">Perfil</label>
-              <select
-                value={medicoPerfil}
-                onChange={(e) =>
-                  setMedicoPerfil(
-                    e.target.value === "admin" ? "admin" : "medico"
-                  )
-                }
-                className="w-full rounded-md border border-slate-300 px-3 py-2"
-              >
-                <option value="medico">Médico</option>
-                <option value="admin">Administrador</option>
-              </select>
-            </div>
+          <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+            <input placeholder="Nome do médico" value={nome} onChange={(e) => setNome(e.target.value)}
+              style={{ padding: 10, border: "1px solid #ccc", borderRadius: 8 }} />
+            <input placeholder="CRM (opcional)" value={crm} onChange={(e) => setCrm(e.target.value)}
+              style={{ padding: 10, border: "1px solid #ccc", borderRadius: 8 }} />
+            <input placeholder="E-mail" value={email} onChange={(e) => setEmail(e.target.value)}
+              style={{ padding: 10, border: "1px solid #ccc", borderRadius: 8 }} />
+            <input placeholder="Senha" type="password" value={senha} onChange={(e) => setSenha(e.target.value)}
+              style={{ padding: 10, border: "1px solid #ccc", borderRadius: 8 }} />
 
-            <button
-              onClick={handleAdicionarMedico}
-              className="mt-2 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800"
-            >
+            <select value={perfil} onChange={(e) => setPerfil(e.target.value as any)}
+              style={{ padding: 10, border: "1px solid #ccc", borderRadius: 8 }}>
+              <option value="medico">Médico</option>
+              <option value="admin">Admin</option>
+            </select>
+
+            <button onClick={addUser} style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #333" }}>
               Adicionar médico
             </button>
-
-            {loadingMedicos && (
-              <p className="text-xs text-slate-500 mt-2">
-                Carregando médicos...
-              </p>
-            )}
-            {erroMedicos && (
-              <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-2 py-1 mt-2">
-                {erroMedicos}
-              </p>
-            )}
-
-            <ul className="space-y-1 mt-2">
-              {medicos.length === 0 && !loadingMedicos && (
-                <li className="text-slate-500">
-                  Nenhum médico cadastrado ainda.
-                </li>
-              )}
-              {medicos.map((m) => (
-                <div
-                  key={m.id}
-                  className="flex items-center justify-between border-b py-1"
-                >
-                  <span>
-                    • {m.nome}{" "}
-                    {m.crm && <span>(CRM {m.crm})</span>}{" "}
-                    {m.email && (
-                      <span className="text-slate-500"> - {m.email}</span>
-                    )}{" "}
-                    {m.perfil === "admin" && (
-                      <span className="text-amber-700 font-semibold">
-                        {" "}
-                        [admin]
-                      </span>
-                    )}
-                  </span>
-                  <button
-                    onClick={() => handleRedefinirSenha(m)}
-                    className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-500"
-                  >
-                    Redefinir senha
-                  </button>
-                </div>
-              ))}
-            </ul>
           </div>
-        </section>
 
-        {/* Permissões */}
-        <section className="bg-white rounded-xl shadow-sm p-4 space-y-3 text-sm">
-          <h2 className="text-base font-semibold">Permissões por médico</h2>
-          <p className="text-slate-500">
-            Selecione um médico e marque as cidades em que ele pode agendar
-            exames. (As permissões ainda são salvas localmente neste
-            computador.)
-          </p>
-
-          <select
-            value={medicoSelecionado}
-            onChange={(e) => setMedicoSelecionado(e.target.value)}
-            className="min-w-[220px] rounded-md border border-slate-300 px-3 py-2"
-          >
-            <option value="">Selecione um médico</option>
-            {medicos.map((m) => (
-              <option key={m.id} value={String(m.id)}>
-                {m.nome}
-              </option>
-            ))}
-          </select>
-
-          {medicoSelecionado && (
-            <div className="space-y-2">
-              <p className="text-slate-600">Cidades permitidas:</p>
-              <div className="flex flex-wrap gap-3">
-                {cidades.length === 0 && (
-                  <span className="text-slate-500">
-                    Nenhuma cidade cadastrada.
-                  </span>
-                )}
-                {cidades.map((c) => {
-                  const marcado =
-                    (permissoes[medicoSelecionado] || []).includes(c.nome);
-                  return (
-                    <label key={c.id} className="flex items-center gap-1">
-                      <input
-                        type="checkbox"
-                        checked={marcado}
-                        onChange={() =>
-                          togglePermissao(medicoSelecionado, c.nome)
-                        }
-                      />
-                      <span>{c.nome}</span>
-                    </label>
-                  );
-                })}
-              </div>
-
-              <div className="mt-3">
-                <button
-                  type="button"
-                  onClick={handleSalvarPermissoesClick}
-                  className="px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700"
-                >
-                  Salvar permissões
-                </button>
-              </div>
-            </div>
+          {erroUsers ? (
+            <div style={{ marginTop: 10, color: "crimson" }}>{erroUsers}</div>
+          ) : (
+            <ul style={{ marginTop: 10 }}>
+              {users.map((u) => <li key={u.id}>{u.nome} — {u.email} ({u.perfil})</li>)}
+              {users.length === 0 && <li style={{ opacity: 0.7 }}>Nenhum médico cadastrado ainda.</li>}
+            </ul>
           )}
-        </section>
+        </div>
       </div>
-    </main>
+    </div>
   );
 }

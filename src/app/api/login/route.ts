@@ -1,4 +1,4 @@
-// src/app/api/login/route.ts
+﻿// src/app/api/login/route.ts
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const revalidate = 0;
@@ -6,7 +6,7 @@ export const revalidate = 0;
 import { NextResponse } from "next/server";
 
 function isBuild() {
-  // Durante o build da Vercel o Next pode tentar “executar” coisas para coletar dados
+  // Durante o build da Vercel o Next pode tentar â€œexecutarâ€ coisas para coletar dados
   return process.env.NEXT_PHASE === "phase-production-build";
 }
 
@@ -36,7 +36,7 @@ export async function POST(req: Request) {
       import("bcryptjs"),
     ]);
 
-    const medico = await prisma.medicoAgenda.findUnique({
+    const medico = await prisma.user.findUnique({
       where: { email: email.trim().toLowerCase() },
       select: {
         id: true,
@@ -76,3 +76,4 @@ export async function POST(req: Request) {
     );
   }
 }
+

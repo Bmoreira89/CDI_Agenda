@@ -1,4 +1,4 @@
-// src/app/api/cidades/route.ts
+﻿// src/app/api/cidades/route.ts
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
@@ -12,7 +12,7 @@ export async function GET() {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-    const cidades = await prisma.cidadeAgenda.findMany({
+    const cidades = await prisma.cidade.findMany({
       orderBy: { nome: "asc" },
     });
 
@@ -24,3 +24,4 @@ export async function GET() {
     );
   }
 }
+
