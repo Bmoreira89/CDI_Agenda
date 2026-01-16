@@ -6,21 +6,29 @@ type Cidade = { id: number; nome: string };
 type User = { id: number; nome: string; email: string; perfil: "admin" | "medico"; crm?: string | null };
 
 export default function AdminPage() {
-  const [token, setToken] = useState<string>("");
   const [cidades, setCidades] = useState<Cidade[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [erroCidades, setErroCidades] = useState<string>("");
   const [erroUsers, setErroUsers] = useState<string>("");
 
-  const headers = useMemo(() => ({
-    "Content-Type": "application/json",
-    "x-admin-token": token || "",
-  }), [token]);
+  const [userId, setUserId] = useState<string>("");
+  const [token, setToken] = useState<string>("");
 
   useEffect(() => {
-    const t = localStorage.getItem("agenda_cdi_admin_token") || "CDI_ADMIN_123";
+    const id = localStorage.getItem("agenda_cdi_user_id") || "";
+    setUserId(id);
+    const t = localStorage.getItem("agenda_cdi_admin_token") || "";
     setToken(t);
   }, []);
+
+  const headers = useMemo(
+    () => ({
+      "Content-Type": "application/json",
+      "x-user-id": userId || "",
+      "x-admin-token": token || "",
+    }),
+    [userId, token]
+  );
 
   const carregar = async () => {
     setErroCidades("");
@@ -46,9 +54,9 @@ export default function AdminPage() {
   };
 
   useEffect(() => {
-    if (token) carregar();
+    if (userId) carregar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [userId]);
 
   const [novaCidade, setNovaCidade] = useState("");
   const addCidade = async () => {
@@ -56,7 +64,8 @@ export default function AdminPage() {
     if (!nome) return;
     const r = await fetch("/api/admin/cities", { method: "POST", headers, body: JSON.stringify({ nome }) });
     if (!r.ok) {
-      alert("Não foi possível adicionar cidade.");
+      const j = await r.json().catch(() => ({}));
+      alert(j?.error || "Não foi possível adicionar cidade.");
       return;
     }
     setNovaCidade("");
@@ -67,13 +76,14 @@ export default function AdminPage() {
   const [crm, setCrm] = useState("");
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
-  const [perfil, setPerfil] = useState<"admin"|"medico">("medico");
+  const [perfil, setPerfil] = useState<"admin" | "medico">("medico");
 
   const addUser = async () => {
     const payload = { nome: nome.trim(), crm: crm.trim() || null, email: email.trim(), senha: senha.trim(), perfil };
     const r = await fetch("/api/admin/users", { method: "POST", headers, body: JSON.stringify(payload) });
     if (!r.ok) {
-      alert("Não foi possível adicionar médico/usuário.");
+      const j = await r.json().catch(() => ({}));
+      alert(j?.error || "Não foi possível adicionar médico/usuário.");
       return;
     }
     setNome(""); setCrm(""); setEmail(""); setSenha(""); setPerfil("medico");
@@ -84,17 +94,18 @@ export default function AdminPage() {
     <div style={{ padding: 24 }}>
       <h1 style={{ fontSize: 28, fontWeight: 700 }}>Painel do administrador</h1>
       <p style={{ marginTop: 6, opacity: 0.8 }}>
-        Cadastre cidades/locais, médicos (no banco) e depois use o calendário para lançar os exames.
+        Cadastre cidades/locais e usuários. (Se der unauthorized, confirme que seu usuário é perfil ADMIN.)
       </p>
 
-      <div style={{ marginTop: 16, display: "flex", gap: 12, alignItems: "center" }}>
-        <label style={{ fontWeight: 600 }}>Token admin:</label>
+      <div style={{ marginTop: 14, display: "flex", gap: 12, alignItems: "center" }}>
+        <label style={{ fontWeight: 600 }}>Token (opcional):</label>
         <input
           value={token}
           onChange={(e) => {
             setToken(e.target.value);
             localStorage.setItem("agenda_cdi_admin_token", e.target.value);
           }}
+          placeholder="deixe vazio se não usar"
           style={{ width: 260, padding: 8, border: "1px solid #ccc", borderRadius: 8 }}
         />
         <button onClick={carregar} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #333" }}>

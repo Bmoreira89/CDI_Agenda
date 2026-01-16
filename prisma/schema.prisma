@@ -7,39 +7,41 @@ generator client {
   provider = "prisma-client-js"
 }
 
-model MedicoAgenda {
+model User {
   id        Int      @id @default(autoincrement())
   nome      String
   crm       String?
   email     String   @unique
-  senha     String?
-  perfil    String   @default("medico") // "medico" | "admin"
+  senha     String
+  perfil    String   @default("medico") // "admin" ou "medico"
   createdAt DateTime @default(now())
 
-  eventos   EventoAgenda[]
+  eventos   Evento[]
   logs      LogAcao[]
 }
 
-model CidadeAgenda {
+model Cidade {
   id   Int    @id @default(autoincrement())
   nome String @unique
 }
 
-model EventoAgenda {
-  id        Int      @id @default(autoincrement())
-  data      DateTime
-  descricao String
+model Evento {
+  id         Int      @id @default(autoincrement())
+  date       DateTime
+  cidade     String
+  quantidade Int
+  medicoId   Int
+  medicoNome String
 
-  medicoId  Int
-  medico    MedicoAgenda @relation(fields: [medicoId], references: [id])
+  medico     User     @relation(fields: [medicoId], references: [id])
+  createdAt  DateTime @default(now())
 }
 
 model LogAcao {
-  id        Int           @id @default(autoincrement())
+  id        Int      @id @default(autoincrement())
   usuarioId Int?
-  usuario   MedicoAgenda? @relation(fields: [usuarioId], references: [id])
-
+  usuario   User?    @relation(fields: [usuarioId], references: [id])
   acao      String
   detalhes  String?
-  dataHora  DateTime      @default(now())
+  dataHora  DateTime @default(now())
 }
