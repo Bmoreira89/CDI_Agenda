@@ -7,7 +7,7 @@ generator client {
   provider = "prisma-client-js"
 }
 
-model User {
+model MedicoAgenda {
   id        Int      @id @default(autoincrement())
   nome      String
   crm       String?
@@ -16,23 +16,33 @@ model User {
   perfil    String   @default("medico") // "admin" ou "medico"
   createdAt DateTime @default(now())
 
-  eventos   Evento[]
+  eventos   EventoAgenda[]
+  logs      LogAcao[]
 }
 
-model Cidade {
+model CidadeAgenda {
   id   Int    @id @default(autoincrement())
   nome String @unique
 }
 
-model Evento {
+model EventoAgenda {
   id         Int      @id @default(autoincrement())
-  date       DateTime
+  data       DateTime
   cidade     String
   quantidade Int
-
   medicoId   Int
   medicoNome String
-
-  medico     User     @relation(fields: [medicoId], references: [id])
   createdAt  DateTime @default(now())
+
+  medico     MedicoAgenda @relation(fields: [medicoId], references: [id])
+}
+
+model LogAcao {
+  id        Int           @id @default(autoincrement())
+  usuarioId Int?
+  usuario   MedicoAgenda? @relation(fields: [usuarioId], references: [id])
+
+  acao      String
+  detalhes  String?
+  dataHora  DateTime      @default(now())
 }
