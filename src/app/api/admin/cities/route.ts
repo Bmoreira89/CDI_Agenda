@@ -4,11 +4,26 @@ export const runtime = "nodejs";
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 
-async function isAdmin(req: NextRequest) {
-  const userId = req.headers.get("x-user-id");
-  if (!userId) return false;
+function getTokenFromReq(req: NextRequest) {
+  const h = req.headers;
+  const byHeader =
+    h.get("x-admin-token") ||
+    h.get("x-token") ||
+    h.get("authorization")?.replace(/^Bearer\s+/i, "") ||
+    "";
+  const byQuery = new URL(req.url).searchParams.get("token") || "";
+  return (byHeader || byQuery).trim();
+}
 
-  const id = Number(userId);
+async function isAdmin(req: NextRequest) {
+  // (A) Token-based (compatível com sua tela atual do /admin)
+  const token = getTokenFromReq(req);
+  const expected = (process.env.ADMIN_TOKEN || "").trim();
+  if (expected && token && token === expected) return true;
+
+  // (B) Header-based (x-user-id)
+  const userId = req.headers.get("x-user-id");
+  const id = Number(userId ?? 0);
   if (!id || Number.isNaN(id)) return false;
 
   const u = await prisma.medicoAgenda.findUnique({
@@ -35,6 +50,7 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}));
   const nome = String(body?.nome ?? "").trim();
+
   if (!nome) return NextResponse.json({ error: "nome_obrigatorio" }, { status: 400 });
 
   try {
