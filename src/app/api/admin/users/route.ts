@@ -5,68 +5,59 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 
-function getTokenFromReq(req: NextRequest) {
-  const h = req.headers;
-  const byHeader =
-    h.get("x-admin-token") ||
-    h.get("x-token") ||
-    h.get("authorization")?.replace(/^Bearer\s+/i, "") ||
-    "";
-  const byQuery = new URL(req.url).searchParams.get("token") || "";
-  return (byHeader || byQuery).trim();
-}
+function isAdmin(req: NextRequest) {
+  const token =
+    req.headers.get("x-admin-token") ||
+    req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
 
-async function isAdmin(req: NextRequest) {
-  // (A) Token-based
-  const token = getTokenFromReq(req);
-  const expected = (process.env.ADMIN_TOKEN || "").trim();
-  if (expected && token && token === expected) return true;
+  const expected = process.env.ADMIN_TOKEN;
 
-  // (B) Header-based (x-user-id)
-  const userId = req.headers.get("x-user-id");
-  const id = Number(userId ?? 0);
-  if (!id || Number.isNaN(id)) return false;
-
-  const u = await prisma.medicoAgenda.findUnique({
-    where: { id },
-    select: { perfil: true },
-  });
-
-  return String(u?.perfil ?? "").toLowerCase() === "admin";
+  return Boolean(expected && token && token === expected);
 }
 
 export async function GET(req: NextRequest) {
-  if (!(await isAdmin(req))) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!isAdmin(req)) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
 
   const users = await prisma.medicoAgenda.findMany({
-    orderBy: [{ nome: "asc" }, { email: "asc" }],
-    select: { id: true, nome: true, email: true, crm: true, perfil: true, createdAt: true },
+    orderBy: { nome: "asc" },
+    select: {
+      id: true,
+      nome: true,
+      email: true,
+      crm: true,
+      perfil: true,
+      createdAt: true,
+    },
   });
 
   return NextResponse.json(users);
 }
 
 export async function POST(req: NextRequest) {
-  if (!(await isAdmin(req))) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!isAdmin(req)) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
 
   const body = await req.json().catch(() => ({}));
+
   const nome = String(body?.nome ?? "").trim();
   const email = String(body?.email ?? "").trim().toLowerCase();
-  const crm = body?.crm ? String(body.crm).trim() : null;
-  const perfil = String(body?.perfil ?? "medico").toLowerCase() === "admin" ? "admin" : "medico";
   const senha = String(body?.senha ?? "").trim();
+  const crm = body?.crm ? String(body.crm).trim() : null;
+  const perfil = body?.perfil === "admin" ? "admin" : "medico";
 
-  if (!nome || !email || !senha) return NextResponse.json({ error: "campos_obrigatorios" }, { status: 400 });
+  if (!nome || !email || !senha) {
+    return NextResponse.json({ error: "campos_obrigatorios" }, { status: 400 });
+  }
 
   const hash = await bcrypt.hash(senha, 10);
 
-  try {
-    const created = await prisma.medicoAgenda.create({
-      data: { nome, email, crm, perfil, senha: hash },
-      select: { id: true, nome: true, email: true, crm: true, perfil: true },
-    });
-    return NextResponse.json(created);
-  } catch (e: any) {
-    return NextResponse.json({ error: "erro_criar_usuario", details: e?.message ?? String(e) }, { status: 500 });
-  }
+  const created = await prisma.medicoAgenda.create({
+    data: { nome, email, senha: hash, crm, perfil },
+    select: { id: true, nome: true, email: true, crm: true, perfil: true },
+  });
+
+  return NextResponse.json(created);
 }
