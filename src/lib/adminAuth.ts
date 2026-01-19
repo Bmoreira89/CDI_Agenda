@@ -1,20 +1,38 @@
-﻿import { NextRequest } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+﻿import prisma from "@/lib/prisma";
 
-export async function isAdminRequest(req: NextRequest) {
-  // 1) Tenta NextAuth (se estiver funcionando)
+// Tenta validar admin por:
+// 1) Header x-user-id (quando o front envia)
+// 2) NextAuth session (se estiver configurado)
+// Mantém compatibilidade e evita erro de tipagem no build.
+export async function isAdmin(req?: any): Promise<boolean> {
+  // (1) Header-based (preferido)
   try {
-    const session = await getServerSession(authOptions as any);
-    const u: any = session?.user;
-    const role = String(u?.perfil ?? u?.role ?? "").toLowerCase();
-    if (role === "admin") return true;
+    const headers = req?.headers;
+    const userIdRaw =
+      (typeof headers?.get === "function" ? headers.get("x-user-id") : null) ??
+      headers?.["x-user-id"] ??
+      headers?.["X-User-Id"] ??
+      null;
+
+    const id = Number(userIdRaw ?? 0);
+    if (id && !Number.isNaN(id)) {
+      const u = await prisma.medicoAgenda.findUnique({
+        where: { id },
+        select: { perfil: true },
+      });
+      return String(u?.perfil ?? "").toLowerCase() === "admin";
+    }
   } catch {}
 
-  // 2) Fallback: token simples via header
-  const token = req.headers.get("x-admin-token") || "";
-  const expected = process.env.ADMIN_TOKEN || "";
-  if (expected && token === expected) return true;
+  // (2) NextAuth session (fallback)
+  try {
+    const { getServerSession } = await import("next-auth");
+    const { authOptions } = await import("@/lib/auth");
+    const session: any = await getServerSession(authOptions as any);
+    const u: any = session?.user;
+    const role = String(u?.perfil ?? u?.role ?? "").toLowerCase();
+    return role === "admin" || role === "administrator";
+  } catch {}
 
   return false;
 }
