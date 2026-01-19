@@ -8,11 +8,19 @@ type PerfilTipo = "medico" | "admin";
 type Cidade = { id: number; nome: string };
 type Usuario = { id: number; nome: string; email: string; crm: string | null; perfil: PerfilTipo };
 
-function getAuthHeaders() {
-  if (typeof window === "undefined") return {};
-  const id = localStorage.getItem("agenda_cdi_user_id");
-  if (!id) return {};
-  return { "x-user-id": String(id) };
+// Sempre retorna HeadersInit (nunca union {} | {...})
+function getAuthHeaders(adminToken?: string): HeadersInit {
+  const headers = new Headers();
+
+  if (typeof window !== "undefined") {
+    const id = localStorage.getItem("agenda_cdi_user_id");
+    if (id) headers.set("x-user-id", String(id));
+
+    const token = (adminToken ?? "").trim();
+    if (token) headers.set("x-admin-token", token);
+  }
+
+  return headers;
 }
 
 export default function AdminPage() {
@@ -34,7 +42,10 @@ export default function AdminPage() {
   const [erroCidades, setErroCidades] = useState("");
   const [erroMedicos, setErroMedicos] = useState("");
 
-  // permissões continuam locais (como você já tinha)
+  // token opcional (ADMIN_TOKEN)
+  const [adminToken, setAdminToken] = useState("");
+
+  // permissões continuam locais
   const [permissoes, setPermissoes] = useState<Record<string, string[]>>({});
   const [medicoSelecionado, setMedicoSelecionado] = useState<string>("");
 
@@ -43,6 +54,7 @@ export default function AdminPage() {
 
     const storedPerfil = localStorage.getItem("agenda_cdi_perfil");
     const storedUserId = localStorage.getItem("agenda_cdi_user_id");
+    const storedToken = localStorage.getItem("agenda_cdi_admin_token") || "";
 
     const perfilAtual: PerfilTipo = storedPerfil === "admin" ? "admin" : "medico";
     setPerfil(perfilAtual);
@@ -50,6 +62,8 @@ export default function AdminPage() {
     if (storedUserId && !Number.isNaN(Number(storedUserId))) {
       setUserId(Number(storedUserId));
     }
+
+    setAdminToken(storedToken);
 
     const storedPerm = localStorage.getItem("agenda_cdi_permissoes");
     if (storedPerm) {
@@ -62,7 +76,6 @@ export default function AdminPage() {
   }, []);
 
   useEffect(() => {
-    // se não for admin, volta pro calendário
     if (perfil !== "admin") return;
     carregarTudo();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -77,13 +90,12 @@ export default function AdminPage() {
     try {
       const res = await fetch("/api/admin/cities", {
         method: "GET",
-        headers: { ...getAuthHeaders() },
+        headers: getAuthHeaders(adminToken),
         cache: "no-store",
       });
 
       if (res.status === 401) {
-        alert("unauthorized (admin). Faça login novamente.");
-        router.push("/login");
+        alert("unauthorized (admin). Informe o Token (ADMIN_TOKEN) ou faça login com um usuário ADMIN.");
         return;
       }
 
@@ -101,13 +113,12 @@ export default function AdminPage() {
     try {
       const res = await fetch("/api/admin/users", {
         method: "GET",
-        headers: { ...getAuthHeaders() },
+        headers: getAuthHeaders(adminToken),
         cache: "no-store",
       });
 
       if (res.status === 401) {
-        alert("unauthorized (admin). Faça login novamente.");
-        router.push("/login");
+        alert("unauthorized (admin). Informe o Token (ADMIN_TOKEN) ou faça login com um usuário ADMIN.");
         return;
       }
 
@@ -125,9 +136,12 @@ export default function AdminPage() {
     if (!nome) return;
 
     try {
+      const headers = getAuthHeaders(adminToken);
+      headers.set("Content-Type", "application/json");
+
       const res = await fetch("/api/admin/cities", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        headers,
         body: JSON.stringify({ nome }),
       });
 
@@ -135,7 +149,6 @@ export default function AdminPage() {
 
       if (res.status === 401) {
         alert("unauthorized");
-        router.push("/login");
         return;
       }
 
@@ -165,9 +178,12 @@ export default function AdminPage() {
     }
 
     try {
+      const headers = getAuthHeaders(adminToken);
+      headers.set("Content-Type", "application/json");
+
       const res = await fetch("/api/admin/users", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        headers,
         body: JSON.stringify({ nome, email, senha, crm, perfil: perfilSel }),
       });
 
@@ -175,7 +191,6 @@ export default function AdminPage() {
 
       if (res.status === 401) {
         alert("unauthorized");
-        router.push("/login");
         return;
       }
 
@@ -206,6 +221,12 @@ export default function AdminPage() {
     const updated = { ...permissoes, [medicoSelecionado]: novo };
     setPermissoes(updated);
     localStorage.setItem("agenda_cdi_permissoes", JSON.stringify(updated));
+  }
+
+  function salvarTokenLocal() {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("agenda_cdi_admin_token", adminToken.trim());
+    alert("Token salvo. Clique em Recarregar.");
   }
 
   function sair() {
@@ -240,6 +261,33 @@ export default function AdminPage() {
         </button>
       </div>
 
+      {/* TOKEN */}
+      <div className="bg-white rounded-lg border p-4 mb-6">
+        <div className="flex flex-col md:flex-row md:items-end gap-3">
+          <div className="flex-1">
+            <label className="text-sm font-medium">Token (opcional)</label>
+            <input
+              className="border rounded px-3 py-2 w-full"
+              placeholder="deixe vazio se não usar"
+              value={adminToken}
+              onChange={(e) => setAdminToken(e.target.value)}
+            />
+            <p className="text-xs opacity-60 mt-1">
+              Se estiver dando <b>unauthorized</b>, informe aqui o <b>ADMIN_TOKEN</b> configurado no servidor/Vercel.
+            </p>
+          </div>
+
+          <div className="flex gap-2">
+            <button className="px-4 py-2 rounded border" onClick={salvarTokenLocal}>
+              Salvar token
+            </button>
+            <button className="px-4 py-2 rounded bg-black text-white" onClick={carregarTudo}>
+              Recarregar
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* CIDADES */}
         <div className="bg-white rounded-lg border p-4">
@@ -256,7 +304,9 @@ export default function AdminPage() {
             </button>
           </div>
 
-          {erroCidades && <div className="mt-3 text-sm text-red-600 bg-red-50 border border-red-200 p-2 rounded">{erroCidades}</div>}
+          {erroCidades && (
+            <div className="mt-3 text-sm text-red-600 bg-red-50 border border-red-200 p-2 rounded">{erroCidades}</div>
+          )}
 
           <div className="mt-4 text-sm">
             {cidades.length === 0 ? (
@@ -276,14 +326,39 @@ export default function AdminPage() {
           <h2 className="font-semibold mb-3">Médicos (banco)</h2>
 
           <div className="space-y-2">
-            <input className="border rounded px-3 py-2 w-full" placeholder="Nome do médico" value={novoNome} onChange={(e) => setNovoNome(e.target.value)} />
-            <input className="border rounded px-3 py-2 w-full" placeholder="CRM (opcional)" value={novoCRM} onChange={(e) => setNovoCRM(e.target.value)} />
-            <input className="border rounded px-3 py-2 w-full" placeholder="E-mail" value={novoEmail} onChange={(e) => setNovoEmail(e.target.value)} />
-            <input className="border rounded px-3 py-2 w-full" placeholder="Senha" type="password" value={novaSenha} onChange={(e) => setNovaSenha(e.target.value)} />
+            <input
+              className="border rounded px-3 py-2 w-full"
+              placeholder="Nome do médico"
+              value={novoNome}
+              onChange={(e) => setNovoNome(e.target.value)}
+            />
+            <input
+              className="border rounded px-3 py-2 w-full"
+              placeholder="CRM (opcional)"
+              value={novoCRM}
+              onChange={(e) => setNovoCRM(e.target.value)}
+            />
+            <input
+              className="border rounded px-3 py-2 w-full"
+              placeholder="E-mail"
+              value={novoEmail}
+              onChange={(e) => setNovoEmail(e.target.value)}
+            />
+            <input
+              className="border rounded px-3 py-2 w-full"
+              placeholder="Senha"
+              type="password"
+              value={novaSenha}
+              onChange={(e) => setNovaSenha(e.target.value)}
+            />
 
             <div className="flex items-center gap-2">
               <label className="text-sm opacity-70">Perfil</label>
-              <select className="border rounded px-3 py-2" value={novoPerfil} onChange={(e) => setNovoPerfil(e.target.value as PerfilTipo)}>
+              <select
+                className="border rounded px-3 py-2"
+                value={novoPerfil}
+                onChange={(e) => setNovoPerfil(e.target.value as PerfilTipo)}
+              >
                 <option value="medico">Médico</option>
                 <option value="admin">Admin</option>
               </select>
@@ -294,7 +369,9 @@ export default function AdminPage() {
             </button>
           </div>
 
-          {erroMedicos && <div className="mt-3 text-sm text-red-600 bg-red-50 border border-red-200 p-2 rounded">{erroMedicos}</div>}
+          {erroMedicos && (
+            <div className="mt-3 text-sm text-red-600 bg-red-50 border border-red-200 p-2 rounded">{erroMedicos}</div>
+          )}
 
           <div className="mt-4 text-sm">
             {medicos.length === 0 ? (
