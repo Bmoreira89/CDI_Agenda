@@ -1,167 +1,111 @@
 ﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-
-type PerfilTipo = "medico" | "admin";
 
 type Cidade = { id: number; nome: string };
-type Usuario = { id: number; nome: string; email: string; crm: string | null; perfil: PerfilTipo };
+type Medico = {
+  id: number;
+  nome: string;
+  email: string;
+  crm: string | null;
+  perfil: string;
+  createdAt?: string;
+};
 
-// Sempre retorna HeadersInit (nunca union {} | {...})
-function getAuthHeaders(adminToken?: string): HeadersInit {
-  const headers = new Headers();
-
-  if (typeof window !== "undefined") {
-    const id = localStorage.getItem("agenda_cdi_user_id");
-    if (id) headers.set("x-user-id", String(id));
-
-    const token = (adminToken ?? "").trim();
-    if (token) headers.set("x-admin-token", token);
+function makeHeaders(adminToken?: string) {
+  const h = new Headers();
+  if (adminToken && adminToken.trim()) {
+    h.set("x-admin-token", adminToken.trim());
   }
-
-  return headers;
+  return h;
 }
 
 export default function AdminPage() {
-  const router = useRouter();
-
-  const [perfil, setPerfil] = useState<PerfilTipo>("medico");
-  const [userId, setUserId] = useState<number | null>(null);
+  const [adminToken, setAdminToken] = useState<string>("");
+  const [loading, setLoading] = useState(false);
 
   const [cidades, setCidades] = useState<Cidade[]>([]);
-  const [medicos, setMedicos] = useState<Usuario[]>([]);
+  const [medicos, setMedicos] = useState<Medico[]>([]);
 
-  const [cidadeNome, setCidadeNome] = useState("");
+  const [novaCidade, setNovaCidade] = useState("");
   const [novoNome, setNovoNome] = useState("");
-  const [novoCRM, setNovoCRM] = useState("");
+  const [novoCrm, setNovoCrm] = useState("");
   const [novoEmail, setNovoEmail] = useState("");
   const [novaSenha, setNovaSenha] = useState("");
-  const [novoPerfil, setNovoPerfil] = useState<PerfilTipo>("medico");
+  const [novoPerfil, setNovoPerfil] = useState<"medico" | "admin">("medico");
 
-  const [erroCidades, setErroCidades] = useState("");
-  const [erroMedicos, setErroMedicos] = useState("");
-
-  // token opcional (ADMIN_TOKEN)
-  const [adminToken, setAdminToken] = useState("");
-
-  // permissões continuam locais
-  const [permissoes, setPermissoes] = useState<Record<string, string[]>>({});
-  const [medicoSelecionado, setMedicoSelecionado] = useState<string>("");
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const storedPerfil = localStorage.getItem("agenda_cdi_perfil");
-    const storedUserId = localStorage.getItem("agenda_cdi_user_id");
-    const storedToken = localStorage.getItem("agenda_cdi_admin_token") || "";
-
-    const perfilAtual: PerfilTipo = storedPerfil === "admin" ? "admin" : "medico";
-    setPerfil(perfilAtual);
-
-    if (storedUserId && !Number.isNaN(Number(storedUserId))) {
-      setUserId(Number(storedUserId));
-    }
-
-    setAdminToken(storedToken);
-
-    const storedPerm = localStorage.getItem("agenda_cdi_permissoes");
-    if (storedPerm) {
-      try {
-        setPermissoes(JSON.parse(storedPerm));
-      } catch {
-        setPermissoes({});
-      }
-    }
+  const tokenSalvo = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("ADMIN_TOKEN_UI") || "";
   }, []);
 
   useEffect(() => {
-    if (perfil !== "admin") return;
-    carregarTudo();
+    if (tokenSalvo) setAdminToken(tokenSalvo);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [perfil]);
+  }, []);
 
-  async function carregarTudo() {
-    await Promise.all([carregarCidades(), carregarMedicos()]);
-  }
-
-  async function carregarCidades() {
-    setErroCidades("");
+  async function carregar() {
+    setLoading(true);
     try {
-      const res = await fetch("/api/admin/cities", {
+      const h = makeHeaders(adminToken);
+
+      const resC = await fetch("/api/admin/cities", {
         method: "GET",
-        headers: getAuthHeaders(adminToken),
+        headers: h,
         cache: "no-store",
       });
-
-      if (res.status === 401) {
-        alert("unauthorized (admin). Informe o Token (ADMIN_TOKEN) ou faça login com um usuário ADMIN.");
-        return;
+      if (!resC.ok) {
+        const t = await resC.text().catch(() => "");
+        throw new Error(`Cidades: ${resC.status} ${t || resC.statusText}`);
       }
+      const dataC = (await resC.json()) as Cidade[];
+      setCidades(Array.isArray(dataC) ? dataC : []);
 
-      if (!res.ok) throw new Error("Erro ao carregar cidades");
-      const data: Cidade[] = await res.json();
-      setCidades(data);
-    } catch (e) {
-      console.error(e);
-      setErroCidades("Não foi possível carregar a lista de cidades/locais.");
-    }
-  }
-
-  async function carregarMedicos() {
-    setErroMedicos("");
-    try {
-      const res = await fetch("/api/admin/users", {
+      const resU = await fetch("/api/admin/users", {
         method: "GET",
-        headers: getAuthHeaders(adminToken),
+        headers: h,
         cache: "no-store",
       });
-
-      if (res.status === 401) {
-        alert("unauthorized (admin). Informe o Token (ADMIN_TOKEN) ou faça login com um usuário ADMIN.");
-        return;
+      if (!resU.ok) {
+        const t = await resU.text().catch(() => "");
+        throw new Error(`Médicos: ${resU.status} ${t || resU.statusText}`);
       }
-
-      if (!res.ok) throw new Error("Erro ao carregar médicos");
-      const data: Usuario[] = await res.json();
-      setMedicos(data);
-    } catch (e) {
+      const dataU = (await resU.json()) as Medico[];
+      setMedicos(Array.isArray(dataU) ? dataU : []);
+    } catch (e: any) {
       console.error(e);
-      setErroMedicos("Não foi possível carregar a lista de médicos.");
+      alert(e?.message || "Erro ao carregar dados do admin.");
+      setCidades([]);
+      setMedicos([]);
+    } finally {
+      setLoading(false);
     }
   }
 
   async function adicionarCidade() {
-    const nome = cidadeNome.trim();
-    if (!nome) return;
+    const nome = novaCidade.trim();
+    if (!nome) return alert("Digite o nome da cidade/local.");
 
     try {
-      const headers = getAuthHeaders(adminToken);
-      headers.set("Content-Type", "application/json");
+      const h = makeHeaders(adminToken);
+      h.set("Content-Type", "application/json");
 
       const res = await fetch("/api/admin/cities", {
         method: "POST",
-        headers,
+        headers: h,
         body: JSON.stringify({ nome }),
       });
 
-      const json = await res.json().catch(() => ({}));
-
-      if (res.status === 401) {
-        alert("unauthorized");
-        return;
-      }
-
       if (!res.ok) {
-        alert(json?.error || "Erro ao criar cidade");
-        return;
+        const t = await res.text().catch(() => "");
+        throw new Error(`Falha ao criar cidade: ${res.status} ${t || res.statusText}`);
       }
 
-      setCidadeNome("");
-      await carregarCidades();
-    } catch (e) {
+      setNovaCidade("");
+      await carregar();
+    } catch (e: any) {
       console.error(e);
-      alert("Erro ao comunicar com o servidor (cidades).");
+      alert(e?.message || "Erro ao adicionar cidade.");
     }
   }
 
@@ -169,261 +113,188 @@ export default function AdminPage() {
     const nome = novoNome.trim();
     const email = novoEmail.trim().toLowerCase();
     const senha = novaSenha.trim();
-    const crm = novoCRM.trim() || null;
-    const perfilSel: PerfilTipo = novoPerfil === "admin" ? "admin" : "medico";
+    const crm = novoCrm.trim() ? novoCrm.trim() : null;
 
     if (!nome || !email || !senha) {
-      alert("Preencha nome, e-mail e senha.");
-      return;
+      return alert("Preencha Nome, E-mail e Senha.");
     }
 
     try {
-      const headers = getAuthHeaders(adminToken);
-      headers.set("Content-Type", "application/json");
+      const h = makeHeaders(adminToken);
+      h.set("Content-Type", "application/json");
 
       const res = await fetch("/api/admin/users", {
         method: "POST",
-        headers,
-        body: JSON.stringify({ nome, email, senha, crm, perfil: perfilSel }),
+        headers: h,
+        body: JSON.stringify({
+          nome,
+          email,
+          senha,
+          crm,
+          perfil: novoPerfil,
+        }),
       });
 
-      const json = await res.json().catch(() => ({}));
-
-      if (res.status === 401) {
-        alert("unauthorized");
-        return;
-      }
-
       if (!res.ok) {
-        alert(json?.error || "Erro ao criar médico");
-        return;
+        const t = await res.text().catch(() => "");
+        throw new Error(`Falha ao criar médico: ${res.status} ${t || res.statusText}`);
       }
 
       setNovoNome("");
-      setNovoCRM("");
       setNovoEmail("");
       setNovaSenha("");
+      setNovoCrm("");
       setNovoPerfil("medico");
-      await carregarMedicos();
-    } catch (e) {
+      await carregar();
+    } catch (e: any) {
       console.error(e);
-      alert("Erro ao comunicar com o servidor (médicos).");
+      alert(e?.message || "Erro ao adicionar médico.");
     }
   }
 
-  const cidadesNomes = useMemo(() => cidades.map((c) => c.nome), [cidades]);
-
-  function togglePermissao(cidade: string) {
-    if (!medicoSelecionado) return;
-    const atual = permissoes[medicoSelecionado] || [];
-    const existe = atual.includes(cidade);
-    const novo = existe ? atual.filter((x) => x !== cidade) : [...atual, cidade];
-    const updated = { ...permissoes, [medicoSelecionado]: novo };
-    setPermissoes(updated);
-    localStorage.setItem("agenda_cdi_permissoes", JSON.stringify(updated));
-  }
-
   function salvarTokenLocal() {
-    if (typeof window === "undefined") return;
-    localStorage.setItem("agenda_cdi_admin_token", adminToken.trim());
-    alert("Token salvo. Clique em Recarregar.");
-  }
-
-  function sair() {
-    if (typeof window !== "undefined") localStorage.clear();
-    router.push("/login");
-  }
-
-  if (perfil !== "admin") {
-    return (
-      <div className="p-6">
-        <h1 className="text-xl font-semibold mb-2">Acesso restrito</h1>
-        <p className="mb-4">Você não está como administrador.</p>
-        <button className="px-4 py-2 rounded bg-black text-white" onClick={() => router.push("/calendario")}>
-          Ir para o calendário
-        </button>
-      </div>
-    );
+    localStorage.setItem("ADMIN_TOKEN_UI", adminToken.trim());
+    alert("Token salvo neste navegador. Agora clique em Recarregar.");
   }
 
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div>
+    <main className="min-h-screen bg-slate-50 p-4 md:p-6">
+      <div className="max-w-6xl mx-auto space-y-4">
+        <header className="space-y-1">
           <h1 className="text-2xl font-semibold">Painel do administrador</h1>
-          <p className="text-sm opacity-70">
-            Cadastre cidades/locais, médicos (no banco) e quais locais cada médico pode agendar exames.
+          <p className="text-sm text-slate-500">
+            Cadastre cidades/locais e usuários. (Se der unauthorized, confirme o ADMIN_TOKEN na Vercel.)
           </p>
-          <p className="text-xs opacity-60 mt-1">Admin ID logado: {userId ?? "?"}</p>
-        </div>
-        <button onClick={sair} className="px-4 py-2 rounded bg-black text-white">
-          Sair
-        </button>
-      </div>
+        </header>
 
-      {/* TOKEN */}
-      <div className="bg-white rounded-lg border p-4 mb-6">
-        <div className="flex flex-col md:flex-row md:items-end gap-3">
-          <div className="flex-1">
+        <section className="bg-white rounded-xl shadow-sm p-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div className="flex flex-col gap-1 w-full md:max-w-xl">
             <label className="text-sm font-medium">Token (opcional)</label>
             <input
-              className="border rounded px-3 py-2 w-full"
-              placeholder="deixe vazio se não usar"
               value={adminToken}
               onChange={(e) => setAdminToken(e.target.value)}
+              placeholder="cole aqui o ADMIN_TOKEN"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
             />
-            <p className="text-xs opacity-60 mt-1">
-              Se estiver dando <b>unauthorized</b>, informe aqui o <b>ADMIN_TOKEN</b> configurado no servidor/Vercel.
-            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={salvarTokenLocal}
+                className="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium hover:bg-slate-50"
+              >
+                Salvar token neste PC
+              </button>
+              <button
+                onClick={carregar}
+                className="rounded-md bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+                disabled={loading}
+              >
+                {loading ? "Carregando..." : "Recarregar"}
+              </button>
+            </div>
           </div>
+        </section>
 
-          <div className="flex gap-2">
-            <button className="px-4 py-2 rounded border" onClick={salvarTokenLocal}>
-              Salvar token
-            </button>
-            <button className="px-4 py-2 rounded bg-black text-white" onClick={carregarTudo}>
-              Recarregar
-            </button>
-          </div>
-        </div>
-      </div>
+        <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-white rounded-xl shadow-sm p-4 space-y-3">
+            <h2 className="text-lg font-semibold">Cidades / Locais</h2>
+            <div className="flex gap-2">
+              <input
+                value={novaCidade}
+                onChange={(e) => setNovaCidade(e.target.value)}
+                placeholder="Ex: São Manuel - TC"
+                className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
+              />
+              <button
+                onClick={adicionarCidade}
+                className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+              >
+                Adicionar
+              </button>
+            </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* CIDADES */}
-        <div className="bg-white rounded-lg border p-4">
-          <h2 className="font-semibold mb-3">Cidades / Locais</h2>
-          <div className="flex gap-2">
-            <input
-              className="border rounded px-3 py-2 flex-1"
-              placeholder="Ex: São Manuel - TC"
-              value={cidadeNome}
-              onChange={(e) => setCidadeNome(e.target.value)}
-            />
-            <button className="px-4 py-2 rounded bg-black text-white" onClick={adicionarCidade}>
-              Adicionar
-            </button>
-          </div>
-
-          {erroCidades && (
-            <div className="mt-3 text-sm text-red-600 bg-red-50 border border-red-200 p-2 rounded">{erroCidades}</div>
-          )}
-
-          <div className="mt-4 text-sm">
             {cidades.length === 0 ? (
-              <div className="opacity-70">Nenhuma cidade cadastrada ainda.</div>
+              <p className="text-sm text-slate-500">Nenhuma cidade cadastrada ainda.</p>
             ) : (
-              <ul className="list-disc pl-5">
+              <ul className="text-sm space-y-1">
                 {cidades.map((c) => (
-                  <li key={c.id}>{c.nome}</li>
+                  <li key={c.id} className="flex justify-between border-b border-slate-100 py-1">
+                    <span>{c.nome}</span>
+                    <span className="text-slate-400">#{c.id}</span>
+                  </li>
                 ))}
               </ul>
             )}
           </div>
-        </div>
 
-        {/* MEDICOS */}
-        <div className="bg-white rounded-lg border p-4">
-          <h2 className="font-semibold mb-3">Médicos (banco)</h2>
+          <div className="bg-white rounded-xl shadow-sm p-4 space-y-3">
+            <h2 className="text-lg font-semibold">Médicos (banco)</h2>
 
-          <div className="space-y-2">
             <input
-              className="border rounded px-3 py-2 w-full"
-              placeholder="Nome do médico"
               value={novoNome}
               onChange={(e) => setNovoNome(e.target.value)}
+              placeholder="Nome do médico"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
             />
             <input
-              className="border rounded px-3 py-2 w-full"
+              value={novoCrm}
+              onChange={(e) => setNovoCrm(e.target.value)}
               placeholder="CRM (opcional)"
-              value={novoCRM}
-              onChange={(e) => setNovoCRM(e.target.value)}
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
             />
             <input
-              className="border rounded px-3 py-2 w-full"
-              placeholder="E-mail"
               value={novoEmail}
               onChange={(e) => setNovoEmail(e.target.value)}
+              placeholder="E-mail"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
             />
             <input
-              className="border rounded px-3 py-2 w-full"
-              placeholder="Senha"
-              type="password"
               value={novaSenha}
               onChange={(e) => setNovaSenha(e.target.value)}
+              placeholder="Senha"
+              type="password"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
             />
 
-            <div className="flex items-center gap-2">
-              <label className="text-sm opacity-70">Perfil</label>
+            <div className="flex gap-2 items-center">
+              <label className="text-sm font-medium w-16">Perfil</label>
               <select
-                className="border rounded px-3 py-2"
                 value={novoPerfil}
-                onChange={(e) => setNovoPerfil(e.target.value as PerfilTipo)}
+                onChange={(e) => setNovoPerfil(e.target.value === "admin" ? "admin" : "medico")}
+                className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
               >
                 <option value="medico">Médico</option>
                 <option value="admin">Admin</option>
               </select>
             </div>
 
-            <button className="px-4 py-2 rounded bg-black text-white" onClick={adicionarMedico}>
+            <button
+              onClick={adicionarMedico}
+              className="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+            >
               Adicionar médico
             </button>
-          </div>
 
-          {erroMedicos && (
-            <div className="mt-3 text-sm text-red-600 bg-red-50 border border-red-200 p-2 rounded">{erroMedicos}</div>
-          )}
-
-          <div className="mt-4 text-sm">
             {medicos.length === 0 ? (
-              <div className="opacity-70">Nenhum médico cadastrado ainda.</div>
+              <p className="text-sm text-slate-500">Nenhum médico cadastrado ainda.</p>
             ) : (
-              <ul className="list-disc pl-5">
+              <ul className="text-sm space-y-1">
                 {medicos.map((m) => (
-                  <li key={m.id}>
-                    {m.nome} — {m.email} ({m.perfil})
+                  <li key={m.id} className="border-b border-slate-100 py-2">
+                    <div className="flex justify-between">
+                      <span className="font-medium">{m.nome}</span>
+                      <span className="text-slate-400">#{m.id}</span>
+                    </div>
+                    <div className="text-slate-600">{m.email}</div>
+                    <div className="text-slate-500 text-xs">
+                      perfil: {m.perfil} {m.crm ? `• CRM: ${m.crm}` : ""}
+                    </div>
                   </li>
                 ))}
               </ul>
             )}
           </div>
-        </div>
+        </section>
       </div>
-
-      {/* PERMISSOES */}
-      <div className="bg-white rounded-lg border p-4 mt-6">
-        <h2 className="font-semibold mb-2">Permissões por médico</h2>
-        <p className="text-sm opacity-70 mb-3">
-          Selecione um médico e marque as cidades em que ele pode agendar exames. (As permissões ainda ficam salvas localmente neste computador.)
-        </p>
-
-        <select
-          className="border rounded px-3 py-2 w-full md:w-80"
-          value={medicoSelecionado}
-          onChange={(e) => setMedicoSelecionado(e.target.value)}
-        >
-          <option value="">Selecione um médico</option>
-          {medicos.map((m) => (
-            <option key={m.id} value={String(m.id)}>
-              {m.nome} ({m.perfil})
-            </option>
-          ))}
-        </select>
-
-        {medicoSelecionado && (
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-2">
-            {cidadesNomes.map((c) => {
-              const atual = permissoes[medicoSelecionado] || [];
-              const marcado = atual.includes(c);
-              return (
-                <label key={c} className="flex items-center gap-2 border rounded p-2">
-                  <input type="checkbox" checked={marcado} onChange={() => togglePermissao(c)} />
-                  <span className="text-sm">{c}</span>
-                </label>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
+    </main>
   );
 }
