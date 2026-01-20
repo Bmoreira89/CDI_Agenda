@@ -22,16 +22,8 @@ async function isAdmin(req: NextRequest) {
   return false;
 }
 
-function prismaError(e: any) {
-  const code = e?.code || e?.meta?.cause || "";
-  const msg = e?.message || String(e);
-  return { code, msg };
-}
-
 export async function GET(req: NextRequest) {
-  if (!(await isAdmin(req))) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  if (!(await isAdmin(req))) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const cidades = await prisma.cidadeAgenda.findMany({
     orderBy: { nome: "asc" },
@@ -42,9 +34,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  if (!(await isAdmin(req))) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  if (!(await isAdmin(req))) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
   const nome = String(body?.nome ?? "").trim();
@@ -58,39 +48,21 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json(created);
   } catch (e: any) {
-    const { code, msg } = prismaError(e);
-
-    // Nome duplicado (se tiver unique)
-    if (code === "P2002") {
-      return NextResponse.json({ error: "cidade_ja_existe" }, { status: 409 });
-    }
-
-    return NextResponse.json({ error: "erro_criar_cidade", details: msg }, { status: 500 });
+    return NextResponse.json({ error: "erro_criar_cidade", details: e?.message ?? String(e) }, { status: 500 });
   }
 }
 
 export async function DELETE(req: NextRequest) {
-  if (!(await isAdmin(req))) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  if (!(await isAdmin(req))) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const id = Number(new URL(req.url).searchParams.get("id") ?? 0);
+  const body = await req.json().catch(() => ({}));
+  const id = Number(body?.id ?? 0);
   if (!id) return NextResponse.json({ error: "id_obrigatorio" }, { status: 400 });
 
   try {
     await prisma.cidadeAgenda.delete({ where: { id } });
     return NextResponse.json({ ok: true });
   } catch (e: any) {
-    const { code, msg } = prismaError(e);
-
-    // Se tiver vínculo (FK)
-    if (code === "P2003") {
-      return NextResponse.json(
-        { error: "nao_pode_excluir_cidade_com_vinculos" },
-        { status: 409 }
-      );
-    }
-
-    return NextResponse.json({ error: "erro_excluir_cidade", details: msg }, { status: 500 });
+    return NextResponse.json({ error: "erro_excluir_cidade", details: e?.message ?? String(e) }, { status: 500 });
   }
 }
