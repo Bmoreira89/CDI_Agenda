@@ -14,9 +14,7 @@ type Medico = {
 
 function makeHeaders(adminToken?: string) {
   const h = new Headers();
-  if (adminToken && adminToken.trim()) {
-    h.set("x-admin-token", adminToken.trim());
-  }
+  if (adminToken && adminToken.trim()) h.set("x-admin-token", adminToken.trim());
   return h;
 }
 
@@ -49,11 +47,7 @@ export default function AdminPage() {
     try {
       const h = makeHeaders(adminToken);
 
-      const resC = await fetch("/api/admin/cities", {
-        method: "GET",
-        headers: h,
-        cache: "no-store",
-      });
+      const resC = await fetch("/api/admin/cities", { method: "GET", headers: h, cache: "no-store" });
       if (!resC.ok) {
         const t = await resC.text().catch(() => "");
         throw new Error(`Cidades: ${resC.status} ${t || resC.statusText}`);
@@ -61,11 +55,7 @@ export default function AdminPage() {
       const dataC = (await resC.json()) as Cidade[];
       setCidades(Array.isArray(dataC) ? dataC : []);
 
-      const resU = await fetch("/api/admin/users", {
-        method: "GET",
-        headers: h,
-        cache: "no-store",
-      });
+      const resU = await fetch("/api/admin/users", { method: "GET", headers: h, cache: "no-store" });
       if (!resU.ok) {
         const t = await resU.text().catch(() => "");
         throw new Error(`Médicos: ${resU.status} ${t || resU.statusText}`);
@@ -97,6 +87,7 @@ export default function AdminPage() {
       });
 
       if (!res.ok) {
+        if (res.status === 409) return alert("Essa cidade/local já existe.");
         const t = await res.text().catch(() => "");
         throw new Error(`Falha ao criar cidade: ${res.status} ${t || res.statusText}`);
       }
@@ -109,15 +100,33 @@ export default function AdminPage() {
     }
   }
 
+  async function excluirCidade(id: number) {
+    if (!confirm("Excluir esta cidade/local?")) return;
+
+    try {
+      const h = makeHeaders(adminToken);
+      const res = await fetch(`/api/admin/cities?id=${id}`, { method: "DELETE", headers: h });
+
+      if (!res.ok) {
+        if (res.status === 409) return alert("Não pode excluir: existe vínculo com outros registros.");
+        const t = await res.text().catch(() => "");
+        throw new Error(`Falha ao excluir cidade: ${res.status} ${t || res.statusText}`);
+      }
+
+      await carregar();
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message || "Erro ao excluir cidade.");
+    }
+  }
+
   async function adicionarMedico() {
     const nome = novoNome.trim();
     const email = novoEmail.trim().toLowerCase();
     const senha = novaSenha.trim();
     const crm = novoCrm.trim() ? novoCrm.trim() : null;
 
-    if (!nome || !email || !senha) {
-      return alert("Preencha Nome, E-mail e Senha.");
-    }
+    if (!nome || !email || !senha) return alert("Preencha Nome, E-mail e Senha.");
 
     try {
       const h = makeHeaders(adminToken);
@@ -126,16 +135,11 @@ export default function AdminPage() {
       const res = await fetch("/api/admin/users", {
         method: "POST",
         headers: h,
-        body: JSON.stringify({
-          nome,
-          email,
-          senha,
-          crm,
-          perfil: novoPerfil,
-        }),
+        body: JSON.stringify({ nome, email, senha, crm, perfil: novoPerfil }),
       });
 
       if (!res.ok) {
+        if (res.status === 409) return alert("Este e-mail já está cadastrado. Use outro e-mail.");
         const t = await res.text().catch(() => "");
         throw new Error(`Falha ao criar médico: ${res.status} ${t || res.statusText}`);
       }
@@ -149,6 +153,26 @@ export default function AdminPage() {
     } catch (e: any) {
       console.error(e);
       alert(e?.message || "Erro ao adicionar médico.");
+    }
+  }
+
+  async function excluirMedico(id: number) {
+    if (!confirm("Excluir este médico?")) return;
+
+    try {
+      const h = makeHeaders(adminToken);
+      const res = await fetch(`/api/admin/users?id=${id}`, { method: "DELETE", headers: h });
+
+      if (!res.ok) {
+        if (res.status === 409) return alert("Não pode excluir: este médico tem vínculo com outros registros.");
+        const t = await res.text().catch(() => "");
+        throw new Error(`Falha ao excluir médico: ${res.status} ${t || res.statusText}`);
+      }
+
+      await carregar();
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message || "Erro ao excluir médico.");
     }
   }
 
@@ -217,9 +241,17 @@ export default function AdminPage() {
             ) : (
               <ul className="text-sm space-y-1">
                 {cidades.map((c) => (
-                  <li key={c.id} className="flex justify-between border-b border-slate-100 py-1">
-                    <span>{c.nome}</span>
-                    <span className="text-slate-400">#{c.id}</span>
+                  <li key={c.id} className="flex items-center justify-between border-b border-slate-100 py-2 gap-3">
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{c.nome}</div>
+                      <div className="text-xs text-slate-400">#{c.id}</div>
+                    </div>
+                    <button
+                      onClick={() => excluirCidade(c.id)}
+                      className="rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
+                    >
+                      Excluir
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -244,7 +276,7 @@ export default function AdminPage() {
             <input
               value={novoEmail}
               onChange={(e) => setNovoEmail(e.target.value)}
-              placeholder="E-mail"
+              placeholder="E-mail (precisa ser único)"
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
             />
             <input
@@ -277,16 +309,23 @@ export default function AdminPage() {
             {medicos.length === 0 ? (
               <p className="text-sm text-slate-500">Nenhum médico cadastrado ainda.</p>
             ) : (
-              <ul className="text-sm space-y-1">
+              <ul className="text-sm space-y-2">
                 {medicos.map((m) => (
-                  <li key={m.id} className="border-b border-slate-100 py-2">
-                    <div className="flex justify-between">
-                      <span className="font-medium">{m.nome}</span>
-                      <span className="text-slate-400">#{m.id}</span>
-                    </div>
-                    <div className="text-slate-600">{m.email}</div>
-                    <div className="text-slate-500 text-xs">
-                      perfil: {m.perfil} {m.crm ? `• CRM: ${m.crm}` : ""}
+                  <li key={m.id} className="border-b border-slate-100 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-medium truncate">{m.nome}</div>
+                        <div className="text-slate-600 truncate">{m.email}</div>
+                        <div className="text-slate-500 text-xs">
+                          perfil: {m.perfil} {m.crm ? `• CRM: ${m.crm}` : ""} • #{m.id}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => excluirMedico(m.id)}
+                        className="rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
+                      >
+                        Excluir
+                      </button>
                     </div>
                   </li>
                 ))}
