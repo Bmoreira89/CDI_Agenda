@@ -1,4 +1,4 @@
-datasource db {
+﻿datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
@@ -23,6 +23,7 @@ model MedicoAgenda {
 model CidadeAgenda {
   id   Int    @id @default(autoincrement())
   nome String @unique
+  permissoes PermissaoCidadeAgenda[]
 }
 
 model EventoAgenda {
@@ -46,3 +47,18 @@ model LogAcao {
   detalhes  String?
   dataHora  DateTime      @default(now())
 }
+model PermissaoCidadeAgenda {
+  id        Int      @id @default(autoincrement())
+  email     String
+  cidadeId  Int
+  createdAt DateTime @default(now())
+
+  // Relaciona por email (preferência sua)
+  medico MedicoAgenda? @relation(fields: [email], references: [email])
+  cidade CidadeAgenda   @relation(fields: [cidadeId], references: [id])
+
+  @@unique([email, cidadeId])
+  @@index([email])
+  @@index([cidadeId])
+}
+
