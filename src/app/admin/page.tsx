@@ -12,10 +12,8 @@ type Medico = {
   createdAt?: string;
 };
 
-type PerfilNovo = "medico" | "admin";
-
-const LS_ADMIN_TOKEN = "ADMIN_TOKEN_UI";
-const LS_PERMISSOES = "agenda_cdi_permissoes"; // { [medicoId]: string[] }
+const LS_TOKEN = "ADMIN_TOKEN_UI";
+const LS_PERMS = "PERMISSOES_POR_EMAIL_V1"; // { [email: string]: number[] }
 
 function makeHeaders(adminToken?: string) {
   const h = new Headers();
@@ -23,22 +21,43 @@ function makeHeaders(adminToken?: string) {
   return h;
 }
 
-function readPermissoes(): Record<string, string[]> {
+function loadPerms(): Record<string, number[]> {
   if (typeof window === "undefined") return {};
+  const raw = localStorage.getItem(LS_PERMS);
+  if (!raw) return {};
   try {
-    const raw = localStorage.getItem(LS_PERMISSOES);
-    if (!raw) return {};
     const obj = JSON.parse(raw);
     if (!obj || typeof obj !== "object") return {};
-    return obj as Record<string, string[]>;
+    const out: Record<string, number[]> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (typeof k === "string" && Array.isArray(v)) {
+        out[k.toLowerCase()] = v.map((x) => Number(x)).filter((n) => Number.isFinite(n));
+      }
+    }
+    return out;
   } catch {
     return {};
   }
 }
 
-function writePermissoes(obj: Record<string, string[]>) {
+function savePerms(perms: Record<string, number[]>) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(LS_PERMISSOES, JSON.stringify(obj));
+  localStorage.setItem(LS_PERMS, JSON.stringify(perms));
+}
+
+function friendlyApiError(status: number, text: string) {
+  const t = (text || "").trim();
+
+  if (status === 401) return "unauthorized (confira o ADMIN_TOKEN)";
+  if (status === 409) {
+    if (t.includes("cidade_duplicada")) return "Cidade/local duplicado.";
+    if (t.includes("email_duplicado")) return "E-mail já cadastrado.";
+    if (t.includes("cidade_em_uso")) return "Cidade/local em uso (há vínculos).";
+    if (t.includes("medico_em_uso")) return "Médico em uso (há vínculos).";
+    return "Conflito (duplicado ou vínculo).";
+  }
+
+  return `${status} ${t || ""}`.trim();
 }
 
 export default function AdminPage() {
@@ -53,32 +72,28 @@ export default function AdminPage() {
   const [novoCrm, setNovoCrm] = useState("");
   const [novoEmail, setNovoEmail] = useState("");
   const [novaSenha, setNovaSenha] = useState("");
-  const [novoPerfil, setNovoPerfil] = useState<PerfilNovo>("medico");
+  const [novoPerfil, setNovoPerfil] = useState<"medico" | "admin">("medico");
 
-  // permissões
-  const [medicoPermId, setMedicoPermId] = useState<number | "">("");
-  const [permsSelecionadas, setPermsSelecionadas] = useState<string[]>([]);
+  // permissões por email
+  const [perms, setPerms] = useState<Record<string, number[]>>({});
+  const [emailPerm, setEmailPerm] = useState<string>("");
 
   const tokenSalvo = useMemo(() => {
     if (typeof window === "undefined") return "";
-    return localStorage.getItem(LS_ADMIN_TOKEN) || "";
+    return localStorage.getItem(LS_TOKEN) || "";
   }, []);
 
   useEffect(() => {
     if (tokenSalvo) setAdminToken(tokenSalvo);
+    setPerms(loadPerms());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    // quando troca o médico do painel de permissões, carrega permissões dele do localStorage
-    if (!medicoPermId) {
-      setPermsSelecionadas([]);
-      return;
-    }
-    const all = readPermissoes();
-    const arr = all[String(medicoPermId)] || [];
-    setPermsSelecionadas(Array.isArray(arr) ? arr : []);
-  }, [medicoPermId]);
+    // se o token já está salvo, tenta carregar ao entrar
+    if (tokenSalvo) carregar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function carregar() {
     setLoading(true);
@@ -90,10 +105,12 @@ export default function AdminPage() {
         headers: h,
         cache: "no-store",
       });
+
       if (!resC.ok) {
         const t = await resC.text().catch(() => "");
-        throw new Error(`Cidades: ${resC.status} ${t || resC.statusText}`);
+        throw new Error(`Cidades: ${friendlyApiError(resC.status, t)}`);
       }
+
       const dataC = (await resC.json()) as Cidade[];
       setCidades(Array.isArray(dataC) ? dataC : []);
 
@@ -102,10 +119,12 @@ export default function AdminPage() {
         headers: h,
         cache: "no-store",
       });
+
       if (!resU.ok) {
         const t = await resU.text().catch(() => "");
-        throw new Error(`Médicos: ${resU.status} ${t || resU.statusText}`);
+        throw new Error(`Médicos: ${friendlyApiError(resU.status, t)}`);
       }
+
       const dataU = (await resU.json()) as Medico[];
       setMedicos(Array.isArray(dataU) ? dataU : []);
     } catch (e: any) {
@@ -116,6 +135,11 @@ export default function AdminPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function salvarTokenLocal() {
+    localStorage.setItem(LS_TOKEN, adminToken.trim());
+    alert("Token salvo neste navegador. Agora clique em Recarregar.");
   }
 
   async function adicionarCidade() {
@@ -134,7 +158,7 @@ export default function AdminPage() {
 
       if (!res.ok) {
         const t = await res.text().catch(() => "");
-        throw new Error(`Falha ao criar cidade: ${res.status} ${t || res.statusText}`);
+        throw new Error(`Falha ao criar cidade: ${friendlyApiError(res.status, t)}`);
       }
 
       setNovaCidade("");
@@ -146,30 +170,28 @@ export default function AdminPage() {
   }
 
   async function excluirCidade(id: number, nome: string) {
-    const ok = window.confirm(`Excluir a cidade/local "${nome}"?`);
+    const ok = confirm(`Excluir "${nome}"?`);
     if (!ok) return;
 
     try {
       const h = makeHeaders(adminToken);
-      h.set("Content-Type", "application/json");
-
-      const res = await fetch("/api/admin/cities", {
+      const res = await fetch(`/api/admin/cities?id=${id}`, {
         method: "DELETE",
         headers: h,
-        body: JSON.stringify({ id }),
       });
 
       if (!res.ok) {
         const t = await res.text().catch(() => "");
-        throw new Error(`Falha ao excluir cidade: ${res.status} ${t || res.statusText}`);
+        throw new Error(`Falha ao excluir cidade: ${friendlyApiError(res.status, t)}`);
       }
 
-      // remove da lista de permissões local também
-      const all = readPermissoes();
-      for (const k of Object.keys(all)) {
-        all[k] = (all[k] || []).filter((x) => x !== nome);
+      // também limpa permissões locais que referenciam essa cidade
+      const novo = { ...perms };
+      for (const k of Object.keys(novo)) {
+        novo[k] = (novo[k] || []).filter((cid) => cid !== id);
       }
-      writePermissoes(all);
+      setPerms(novo);
+      savePerms(novo);
 
       await carregar();
     } catch (e: any) {
@@ -184,9 +206,7 @@ export default function AdminPage() {
     const senha = novaSenha.trim();
     const crm = novoCrm.trim() ? novoCrm.trim() : null;
 
-    if (!nome || !email || !senha) {
-      return alert("Preencha Nome, E-mail e Senha.");
-    }
+    if (!nome || !email || !senha) return alert("Preencha Nome, E-mail e Senha.");
 
     try {
       const h = makeHeaders(adminToken);
@@ -206,7 +226,7 @@ export default function AdminPage() {
 
       if (!res.ok) {
         const t = await res.text().catch(() => "");
-        throw new Error(`Falha ao criar médico: ${res.status} ${t || res.statusText}`);
+        throw new Error(`Falha ao criar médico: ${friendlyApiError(res.status, t)}`);
       }
 
       setNovoNome("");
@@ -221,34 +241,30 @@ export default function AdminPage() {
     }
   }
 
-  async function excluirMedico(id: number, nome: string) {
-    const ok = window.confirm(`Excluir o médico "${nome}"?`);
+  async function excluirMedico(id: number, nome: string, email: string) {
+    const ok = confirm(`Excluir médico "${nome}" (${email})?`);
     if (!ok) return;
 
     try {
       const h = makeHeaders(adminToken);
-      h.set("Content-Type", "application/json");
-
-      const res = await fetch("/api/admin/users", {
+      const res = await fetch(`/api/admin/users?id=${id}`, {
         method: "DELETE",
         headers: h,
-        body: JSON.stringify({ id }),
       });
 
       if (!res.ok) {
         const t = await res.text().catch(() => "");
-        throw new Error(`Falha ao excluir médico: ${res.status} ${t || res.statusText}`);
+        throw new Error(`Falha ao excluir médico: ${friendlyApiError(res.status, t)}`);
       }
 
-      // remove permissões dele do local
-      const all = readPermissoes();
-      delete all[String(id)];
-      writePermissoes(all);
+      // remove permissões locais desse e-mail
+      const emailKey = (email || "").toLowerCase();
+      const novo = { ...perms };
+      delete novo[emailKey];
+      setPerms(novo);
+      savePerms(novo);
 
-      if (medicoPermId === id) {
-        setMedicoPermId("");
-        setPermsSelecionadas([]);
-      }
+      if ((emailPerm || "").toLowerCase() === emailKey) setEmailPerm("");
 
       await carregar();
     } catch (e: any) {
@@ -257,32 +273,37 @@ export default function AdminPage() {
     }
   }
 
-  function salvarTokenLocal() {
-    localStorage.setItem(LS_ADMIN_TOKEN, adminToken.trim());
-    alert("Token salvo neste navegador. Agora clique em Recarregar.");
+  // ===== permissões locais por email =====
+  const emailKey = (emailPerm || "").trim().toLowerCase();
+  const allowed = perms[emailKey] || [];
+
+  function toggleCidadePerm(cidadeId: number) {
+    if (!emailKey) return;
+    const set = new Set(allowed);
+    if (set.has(cidadeId)) set.delete(cidadeId);
+    else set.add(cidadeId);
+
+    const novo = { ...perms, [emailKey]: Array.from(set).sort((a, b) => a - b) };
+    setPerms(novo);
   }
 
-  function togglePerm(nomeCidade: string) {
-    setPermsSelecionadas((prev) => {
-      const has = prev.includes(nomeCidade);
-      return has ? prev.filter((x) => x !== nomeCidade) : [...prev, nomeCidade];
-    });
-  }
-
-  function salvarPermissoesDoMedico() {
-    if (!medicoPermId) return alert("Selecione um médico para configurar permissões.");
-    const all = readPermissoes();
-    all[String(medicoPermId)] = permsSelecionadas.slice().sort();
-    writePermissoes(all);
-    alert("Permissões salvas neste navegador (localStorage).");
+  function salvarPermissoes() {
+    if (!emailKey) return alert("Selecione um médico (e-mail) para configurar permissões.");
+    savePerms(perms);
+    alert("Permissões salvas neste navegador (por e-mail).");
   }
 
   function liberarTodas() {
-    setPermsSelecionadas(cidades.map((c) => c.nome));
+    if (!emailKey) return alert("Selecione um médico (e-mail).");
+    const all = cidades.map((c) => c.id);
+    const novo = { ...perms, [emailKey]: all };
+    setPerms(novo);
   }
 
   function limparPerms() {
-    setPermsSelecionadas([]);
+    if (!emailKey) return alert("Selecione um médico (e-mail).");
+    const novo = { ...perms, [emailKey]: [] };
+    setPerms(novo);
   }
 
   return (
@@ -346,14 +367,19 @@ export default function AdminPage() {
             ) : (
               <ul className="text-sm space-y-1">
                 {cidades.map((c) => (
-                  <li key={c.id} className="flex items-center justify-between border-b border-slate-100 py-1">
-                    <div className="flex flex-col">
-                      <span>{c.nome}</span>
-                      <span className="text-slate-400 text-xs">#{c.id}</span>
+                  <li
+                    key={c.id}
+                    className="flex items-center justify-between border-b border-slate-100 py-2 gap-3"
+                  >
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{c.nome}</div>
+                      <div className="text-xs text-slate-400">#{c.id}</div>
                     </div>
+
                     <button
                       onClick={() => excluirCidade(c.id, c.nome)}
-                      className="rounded-md border border-red-300 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+                      className="shrink-0 rounded-md border border-red-200 bg-red-50 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+                      title="Excluir cidade/local"
                     >
                       Excluir
                     </button>
@@ -363,7 +389,7 @@ export default function AdminPage() {
             )}
           </div>
 
-          {/* MEDICOS */}
+          {/* MÉDICOS */}
           <div className="bg-white rounded-xl shadow-sm p-4 space-y-3">
             <h2 className="text-lg font-semibold">Médicos (banco)</h2>
 
@@ -415,25 +441,29 @@ export default function AdminPage() {
             {medicos.length === 0 ? (
               <p className="text-sm text-slate-500">Nenhum médico cadastrado ainda.</p>
             ) : (
-              <ul className="text-sm space-y-1">
+              <ul className="text-sm space-y-2">
                 {medicos.map((m) => (
-                  <li key={m.id} className="border-b border-slate-100 py-2 flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex justify-between gap-2">
-                        <span className="font-medium">{m.nome}</span>
-                        <span className="text-slate-400">#{m.id}</span>
+                  <li key={m.id} className="border border-slate-100 rounded-lg p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold truncate">{m.nome}</span>
+                          <span className="text-slate-400 text-xs">#{m.id}</span>
+                        </div>
+                        <div className="text-slate-600 truncate">{m.email}</div>
+                        <div className="text-slate-500 text-xs">
+                          perfil: {m.perfil} {m.crm ? `• CRM: ${m.crm}` : ""}
+                        </div>
                       </div>
-                      <div className="text-slate-600 break-all">{m.email}</div>
-                      <div className="text-slate-500 text-xs">
-                        perfil: {m.perfil} {m.crm ? `• CRM: ${m.crm}` : ""}
-                      </div>
+
+                      <button
+                        onClick={() => excluirMedico(m.id, m.nome, m.email)}
+                        className="shrink-0 rounded-md border border-red-200 bg-red-50 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+                        title="Excluir médico"
+                      >
+                        Excluir
+                      </button>
                     </div>
-                    <button
-                      onClick={() => excluirMedico(m.id, m.nome)}
-                      className="shrink-0 rounded-md border border-red-300 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
-                    >
-                      Excluir
-                    </button>
                   </li>
                 ))}
               </ul>
@@ -441,25 +471,26 @@ export default function AdminPage() {
           </div>
         </section>
 
-        {/* PERMISSOES */}
+        {/* PERMISSÕES */}
         <section className="bg-white rounded-xl shadow-sm p-4 space-y-3">
-          <h2 className="text-lg font-semibold">Permissões por médico</h2>
+          <h2 className="text-lg font-semibold">Permissões por médico (por e-mail)</h2>
           <p className="text-sm text-slate-500">
-            Nesta versão, as permissões ficam salvas neste navegador (localStorage). Depois a gente leva para o banco.
+            Nesta versão, as permissões ficam salvas neste navegador (localStorage) por e-mail/login.
+            Depois a gente leva isso para o banco.
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
             <div className="md:col-span-1">
               <label className="text-sm font-medium">Médico</label>
               <select
-                value={medicoPermId}
-                onChange={(e) => setMedicoPermId(e.target.value ? Number(e.target.value) : "")}
+                value={emailPerm}
+                onChange={(e) => setEmailPerm(e.target.value)}
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
               >
                 <option value="">Selecione...</option>
                 {medicos.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    #{m.id} - {m.nome} ({m.perfil})
+                  <option key={m.id} value={m.email}>
+                    {m.nome} — {m.email}
                   </option>
                 ))}
               </select>
@@ -479,7 +510,7 @@ export default function AdminPage() {
                 Limpar
               </button>
               <button
-                onClick={salvarPermissoesDoMedico}
+                onClick={salvarPermissoes}
                 className="rounded-md bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-800"
               >
                 Salvar permissões
@@ -487,23 +518,23 @@ export default function AdminPage() {
             </div>
           </div>
 
-          {!medicoPermId ? (
+          {!emailKey ? (
             <p className="text-sm text-slate-500">Selecione um médico acima para marcar as cidades/locais permitidos.</p>
           ) : cidades.length === 0 ? (
             <p className="text-sm text-slate-500">Cadastre cidades/locais primeiro.</p>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
               {cidades.map((c) => {
-                const checked = permsSelecionadas.includes(c.nome);
+                const checked = allowed.includes(c.id);
                 return (
                   <label
                     key={c.id}
-                    className="flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 cursor-pointer"
+                    className="flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50"
                   >
                     <input
                       type="checkbox"
                       checked={checked}
-                      onChange={() => togglePerm(c.nome)}
+                      onChange={() => toggleCidadePerm(c.id)}
                     />
                     <span className="truncate">{c.nome}</span>
                   </label>

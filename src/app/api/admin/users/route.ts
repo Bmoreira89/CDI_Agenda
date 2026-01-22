@@ -23,8 +23,16 @@ async function isAdmin(req: NextRequest) {
   return false;
 }
 
+function prismaMsg(e: any) {
+  const code = e?.code ? String(e.code) : "";
+  const msg = e?.message ? String(e.message) : String(e);
+  return { code, msg };
+}
+
 export async function GET(req: NextRequest) {
-  if (!(await isAdmin(req))) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!(await isAdmin(req))) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
 
   const users = await prisma.medicoAgenda.findMany({
     orderBy: [{ nome: "asc" }, { email: "asc" }],
@@ -35,16 +43,21 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  if (!(await isAdmin(req))) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!(await isAdmin(req))) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
 
   const body = await req.json().catch(() => ({}));
+
   const nome = String(body?.nome ?? "").trim();
   const email = String(body?.email ?? "").trim().toLowerCase();
   const crm = body?.crm ? String(body.crm).trim() : null;
   const perfil = String(body?.perfil ?? "medico").toLowerCase() === "admin" ? "admin" : "medico";
   const senha = String(body?.senha ?? "").trim();
 
-  if (!nome || !email || !senha) return NextResponse.json({ error: "campos_obrigatorios" }, { status: 400 });
+  if (!nome || !email || !senha) {
+    return NextResponse.json({ error: "campos_obrigatorios" }, { status: 400 });
+  }
 
   const hash = await bcrypt.hash(senha, 10);
 
@@ -53,34 +66,62 @@ export async function POST(req: NextRequest) {
       data: { nome, email, crm, perfil, senha: hash },
       select: { id: true, nome: true, email: true, crm: true, perfil: true },
     });
+
     return NextResponse.json(created);
   } catch (e: any) {
-    return NextResponse.json({ error: "erro_criar_usuario", details: e?.message ?? String(e) }, { status: 500 });
+    const { code, msg } = prismaMsg(e);
+
+    // Duplicado (unique) — normalmente e-mail
+    if (code === "P2002") {
+      return NextResponse.json(
+        { error: "email_duplicado", details: "Já existe um usuário com esse e-mail." },
+        { status: 409 }
+      );
+    }
+
+    return NextResponse.json(
+      { error: "erro_criar_usuario", details: msg },
+      { status: 500 }
+    );
   }
 }
 
 export async function DELETE(req: NextRequest) {
-  if (!(await isAdmin(req))) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!(await isAdmin(req))) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
 
-  const body = await req.json().catch(() => ({}));
-  const id = Number(body?.id ?? 0);
-  if (!id) return NextResponse.json({ error: "id_obrigatorio" }, { status: 400 });
+  const idStr = new URL(req.url).searchParams.get("id") || "";
+  const id = Number(idStr);
+
+  if (!id || Number.isNaN(id)) {
+    return NextResponse.json({ error: "id_invalido" }, { status: 400 });
+  }
 
   try {
-    // Evita apagar o último admin por acidente (segurança)
-    const u = await prisma.medicoAgenda.findUnique({ where: { id }, select: { perfil: true } });
-    if (!u) return NextResponse.json({ error: "usuario_nao_encontrado" }, { status: 404 });
-
-    if (String(u.perfil).toLowerCase() === "admin") {
-      const qtdAdmins = await prisma.medicoAgenda.count({ where: { perfil: "admin" } });
-      if (qtdAdmins <= 1) {
-        return NextResponse.json({ error: "nao_pode_excluir_ultimo_admin" }, { status: 400 });
-      }
-    }
-
     await prisma.medicoAgenda.delete({ where: { id } });
     return NextResponse.json({ ok: true });
   } catch (e: any) {
-    return NextResponse.json({ error: "erro_excluir_usuario", details: e?.message ?? String(e) }, { status: 500 });
+    const { code, msg } = prismaMsg(e);
+
+    if (code === "P2025") {
+      return NextResponse.json({ error: "nao_encontrado" }, { status: 404 });
+    }
+
+    // FK / vínculo com eventos etc.
+    if (code === "P2003") {
+      return NextResponse.json(
+        {
+          error: "medico_em_uso",
+          details: "Esse médico está vinculado a registros (ex.: eventos). Remova os vínculos antes.",
+        },
+        { status: 409 }
+      );
+    }
+
+    return NextResponse.json(
+      { error: "erro_excluir_usuario", details: msg },
+      { status: 500 }
+    );
   }
 }

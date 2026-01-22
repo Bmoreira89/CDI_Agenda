@@ -103,3 +103,16 @@ model Evento {
   @@index([cidadeId])
   @@unique([data, userId, cidadeId])
 }
+
+model PermissaoCidadeAgenda {
+  id        Int      @id @default(autoincrement())
+  email     String
+  cidadeId  Int
+  createdAt DateTime @default(now())
+
+  cidade    CidadeAgenda @relation(fields: [cidadeId], references: [id], onDelete: Cascade)
+
+  @@unique([email, cidadeId])
+  @@index([email])
+  @@index([cidadeId])
+}
