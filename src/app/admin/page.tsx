@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 type Cidade = { id: number; nome: string };
 type Medico = {
@@ -21,14 +21,16 @@ type Permissao = {
 
 function makeHeaders(adminToken?: string) {
   const h = new Headers();
-  if (adminToken && adminToken.trim()) {
-    h.set("x-admin-token", adminToken.trim());
-  }
+  if (adminToken && adminToken.trim()) h.set("x-admin-token", adminToken.trim());
   return h;
 }
 
 export default function AdminPage() {
-  const [adminToken, setAdminToken] = useState<string>("");
+  const [adminToken, setAdminToken] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("ADMIN_TOKEN_UI") || "";
+  });
+
   const [loading, setLoading] = useState(false);
 
   const [cidades, setCidades] = useState<Cidade[]>([]);
@@ -44,16 +46,6 @@ export default function AdminPage() {
 
   const [permEmail, setPermEmail] = useState("");
   const [permCidade, setPermCidade] = useState("");
-
-  const tokenSalvo = useMemo(() => {
-    if (typeof window === "undefined") return "";
-    return localStorage.getItem("ADMIN_TOKEN_UI") || "";
-  }, []);
-
-  useEffect(() => {
-    if (tokenSalvo) setAdminToken(tokenSalvo);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   async function carregar() {
     setLoading(true);
@@ -88,6 +80,12 @@ export default function AdminPage() {
     }
   }
 
+  useEffect(() => {
+    // só tenta carregar automaticamente se já tiver token salvo
+    if (adminToken && adminToken.trim()) carregar().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function adicionarCidade() {
     const nome = novaCidade.trim();
     if (!nome) return alert("Digite o nome do local.");
@@ -101,6 +99,12 @@ export default function AdminPage() {
         headers: h,
         body: JSON.stringify({ nome }),
       });
+
+      if (res.status === 409) {
+        alert(`Esse local já existe: ${nome}`);
+        await carregar();
+        return;
+      }
 
       if (!res.ok) {
         const t = await res.text().catch(() => "");
@@ -140,9 +144,7 @@ export default function AdminPage() {
     const senha = novaSenha.trim();
     const crm = novoCrm.trim() ? novoCrm.trim() : null;
 
-    if (!nome || !email || !senha) {
-      return alert("Preencha Nome, E-mail e Senha.");
-    }
+    if (!nome || !email || !senha) return alert("Preencha Nome, E-mail e Senha.");
 
     try {
       const h = makeHeaders(adminToken);
@@ -151,13 +153,7 @@ export default function AdminPage() {
       const res = await fetch("/api/admin/users", {
         method: "POST",
         headers: h,
-        body: JSON.stringify({
-          nome,
-          email,
-          senha,
-          crm,
-          perfil: novoPerfil,
-        }),
+        body: JSON.stringify({ nome, email, senha, crm, perfil: novoPerfil }),
       });
 
       if (!res.ok) {
@@ -199,7 +195,6 @@ export default function AdminPage() {
   async function adicionarPermissao() {
     const email = permEmail.trim().toLowerCase();
     const cidade = permCidade.trim();
-
     if (!email || !cidade) return alert("Selecione o médico (email) e o local.");
 
     try {
@@ -245,23 +240,16 @@ export default function AdminPage() {
 
   function salvarTokenLocal() {
     localStorage.setItem("ADMIN_TOKEN_UI", adminToken.trim());
-    alert("Token salvo neste navegador. Agora clique em Recarregar.");
-  }
-
-  useEffect(() => {
-    // auto-carrega ao abrir
+    alert("Token salvo neste navegador. Vou recarregar agora.");
     carregar().catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }
 
   return (
     <main className="min-h-screen bg-slate-50 p-4 md:p-6">
       <div className="max-w-6xl mx-auto space-y-4">
         <header className="space-y-1">
           <h1 className="text-2xl font-semibold">Painel do administrador</h1>
-          <p className="text-sm text-slate-500">
-            Cadastre locais, médicos e permissões por login (e-mail).
-          </p>
+          <p className="text-sm text-slate-500">Cadastre locais, médicos e permissões por login (e-mail).</p>
         </header>
 
         <section className="bg-white rounded-xl shadow-sm p-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -334,31 +322,14 @@ export default function AdminPage() {
           <div className="bg-white rounded-xl shadow-sm p-4 space-y-3">
             <h2 className="text-lg font-semibold">Médicos (banco)</h2>
 
-            <input
-              value={novoNome}
-              onChange={(e) => setNovoNome(e.target.value)}
-              placeholder="Nome do médico"
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-            />
-            <input
-              value={novoCrm}
-              onChange={(e) => setNovoCrm(e.target.value)}
-              placeholder="CRM (opcional)"
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-            />
-            <input
-              value={novoEmail}
-              onChange={(e) => setNovoEmail(e.target.value)}
-              placeholder="E-mail"
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-            />
-            <input
-              value={novaSenha}
-              onChange={(e) => setNovaSenha(e.target.value)}
-              placeholder="Senha"
-              type="password"
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-            />
+            <input value={novoNome} onChange={(e) => setNovoNome(e.target.value)} placeholder="Nome do médico"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            <input value={novoCrm} onChange={(e) => setNovoCrm(e.target.value)} placeholder="CRM (opcional)"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            <input value={novoEmail} onChange={(e) => setNovoEmail(e.target.value)} placeholder="E-mail"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            <input value={novaSenha} onChange={(e) => setNovaSenha(e.target.value)} placeholder="Senha" type="password"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
 
             <div className="flex gap-2 items-center">
               <label className="text-sm font-medium w-16">Perfil</label>
@@ -372,10 +343,8 @@ export default function AdminPage() {
               </select>
             </div>
 
-            <button
-              onClick={adicionarMedico}
-              className="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
-            >
+            <button onClick={adicionarMedico}
+              className="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
               Adicionar médico
             </button>
 
@@ -393,10 +362,8 @@ export default function AdminPage() {
                           perfil: {m.perfil} {m.crm ? `• CRM: ${m.crm}` : ""} • #{m.id}
                         </div>
                       </div>
-                      <button
-                        onClick={() => excluirMedico(m.id)}
-                        className="rounded-md border border-rose-300 px-3 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50"
-                      >
+                      <button onClick={() => excluirMedico(m.id)}
+                        className="rounded-md border border-rose-300 px-3 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50">
                         Excluir
                       </button>
                     </div>
@@ -411,38 +378,24 @@ export default function AdminPage() {
           <h2 className="text-lg font-semibold">Permissões por médico (email/login)</h2>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-            <select
-              value={permEmail}
-              onChange={(e) => setPermEmail(e.target.value)}
-              className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-            >
+            <select value={permEmail} onChange={(e) => setPermEmail(e.target.value)}
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm">
               <option value="">Selecione o médico (email)</option>
-              {medicos
-                .filter((m) => m.perfil !== "admin")
-                .map((m) => (
-                  <option key={m.id} value={m.email}>
-                    {m.nome} — {m.email}
-                  </option>
-                ))}
-            </select>
-
-            <select
-              value={permCidade}
-              onChange={(e) => setPermCidade(e.target.value)}
-              className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-            >
-              <option value="">Selecione o local</option>
-              {cidades.map((c) => (
-                <option key={c.id} value={c.nome}>
-                  {c.nome}
-                </option>
+              {medicos.filter((m) => m.perfil !== "admin").map((m) => (
+                <option key={m.id} value={m.email}>{m.nome} — {m.email}</option>
               ))}
             </select>
 
-            <button
-              onClick={adicionarPermissao}
-              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
-            >
+            <select value={permCidade} onChange={(e) => setPermCidade(e.target.value)}
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm">
+              <option value="">Selecione o local</option>
+              {cidades.map((c) => (
+                <option key={c.id} value={c.nome}>{c.nome}</option>
+              ))}
+            </select>
+
+            <button onClick={adicionarPermissao}
+              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
               Adicionar permissão
             </button>
           </div>
@@ -458,10 +411,8 @@ export default function AdminPage() {
                     <span className="text-slate-600">{p.cidade}</span>
                     <span className="text-slate-400 text-xs">#{p.id}</span>
                   </div>
-                  <button
-                    onClick={() => excluirPermissao(p.id)}
-                    className="rounded-md border border-rose-300 px-3 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50"
-                  >
+                  <button onClick={() => excluirPermissao(p.id)}
+                    className="rounded-md border border-rose-300 px-3 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50">
                     Excluir
                   </button>
                 </li>
