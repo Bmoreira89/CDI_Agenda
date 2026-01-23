@@ -1,122 +1,75 @@
-"use client";
+﻿"use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-
-type PerfilTipo = "medico" | "admin";
-
-interface LoginResponse {
-  id: number;
-  nome: string;
-  crm?: string | null;
-  email?: string | null;
-  perfil: PerfilTipo;
-}
 
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
-  const [erro, setErro] = useState("");
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const nome = localStorage.getItem("agenda_cdi_nome");
-    if (nome) {
-      router.replace("/calendario");
-    }
-  }, [router]);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErro("");
+  async function entrar() {
     setLoading(true);
-
     try {
       const res = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), senha: senha.trim() }),
+        body: JSON.stringify({ email, senha }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        setErro(data.error || "Falha ao fazer login.");
-        return;
+        const msg = data?.error ? String(data.error) : "Falha no login";
+        throw new Error(msg);
       }
 
-      const user = data as LoginResponse;
+      // salva usuário
+      localStorage.setItem("CDI_USER", JSON.stringify(data.user));
 
-      if (typeof window !== "undefined") {
-        localStorage.setItem("agenda_cdi_nome", user.nome);
-        localStorage.setItem("agenda_cdi_crm", user.crm || "");
-        localStorage.setItem("agenda_cdi_perfil", user.perfil || "medico");
-        localStorage.setItem("agenda_cdi_medico_ativo", user.nome);
-        localStorage.setItem("agenda_cdi_email", user.email || "");
-        localStorage.setItem("agenda_cdi_user_id", String(user.id));
+      // admin vai pro painel
+      const perfil = String(data?.user?.perfil ?? "").toLowerCase();
+      if (perfil === "admin") {
+        router.push("/admin");
+      } else {
+        router.push("/calendario");
       }
-
-      router.push("/calendario");
-    } catch (error) {
-      console.error(error);
-      setErro("Erro ao comunicar com o servidor.");
+    } catch (e: any) {
+      alert(e?.message || "Erro no login");
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   return (
     <main className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-sm bg-white rounded-xl shadow-sm p-6 space-y-4">
-        <h1 className="text-xl font-semibold text-center">Agenda CDI</h1>
-        <p className="text-sm text-slate-500 text-center">
-          Faça login com seu e-mail e senha cadastrados pelo administrador.
-        </p>
+      <div className="w-full max-w-md bg-white rounded-xl shadow-sm p-6 space-y-3">
+        <h1 className="text-xl font-semibold">Login</h1>
+        <p className="text-sm text-slate-500">Acesse o CDI Agenda.</p>
 
-        <form onSubmit={handleSubmit} className="space-y-3 text-sm">
-          <div className="space-y-1">
-            <label className="block text-slate-600">E-mail</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-md border border-slate-300 px-3 py-2"
-              required
-            />
-          </div>
+        <input
+          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+          placeholder="E-mail"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
 
-          <div className="space-y-1">
-            <label className="block text-slate-600">Senha</label>
-            <input
-              type="password"
-              value={senha}
-              onChange={(e) => setSenha(e.target.value)}
-              className="w-full rounded-md border border-slate-300 px-3 py-2"
-              required
-            />
-          </div>
+        <input
+          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+          placeholder="Senha"
+          type="password"
+          value={senha}
+          onChange={(e) => setSenha(e.target.value)}
+        />
 
-          {erro && (
-            <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-2 py-1">
-              {erro}
-            </p>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60"
-          >
-            {loading ? "Entrando..." : "Entrar"}
-          </button>
-        </form>
-
-        <p className="text-xs text-slate-400 text-center">
-          Acesso administrado pela equipe Cuesta / CDI.
-        </p>
+        <button
+          onClick={entrar}
+          disabled={loading}
+          className="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60"
+        >
+          {loading ? "Entrando..." : "Entrar"}
+        </button>
       </div>
     </main>
   );

@@ -17,22 +17,26 @@ function getTokenFromReq(req: NextRequest) {
 }
 
 async function isAdmin(req: NextRequest) {
+  // (A) Token-based
   const token = getTokenFromReq(req);
   const expected = (process.env.ADMIN_TOKEN || "").trim();
   if (expected && token && token === expected) return true;
-  return false;
-}
 
-function prismaMsg(e: any) {
-  const code = e?.code ? String(e.code) : "";
-  const msg = e?.message ? String(e.message) : String(e);
-  return { code, msg };
+  // (B) Header-based (x-user-id)
+  const userId = req.headers.get("x-user-id");
+  const id = Number(userId ?? 0);
+  if (!id || Number.isNaN(id)) return false;
+
+  const u = await prisma.medicoAgenda.findUnique({
+    where: { id },
+    select: { perfil: true },
+  });
+
+  return String(u?.perfil ?? "").toLowerCase() === "admin";
 }
 
 export async function GET(req: NextRequest) {
-  if (!(await isAdmin(req))) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  if (!(await isAdmin(req))) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const users = await prisma.medicoAgenda.findMany({
     orderBy: [{ nome: "asc" }, { email: "asc" }],
@@ -43,21 +47,16 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  if (!(await isAdmin(req))) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  if (!(await isAdmin(req))) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
-
   const nome = String(body?.nome ?? "").trim();
   const email = String(body?.email ?? "").trim().toLowerCase();
   const crm = body?.crm ? String(body.crm).trim() : null;
   const perfil = String(body?.perfil ?? "medico").toLowerCase() === "admin" ? "admin" : "medico";
   const senha = String(body?.senha ?? "").trim();
 
-  if (!nome || !email || !senha) {
-    return NextResponse.json({ error: "campos_obrigatorios" }, { status: 400 });
-  }
+  if (!nome || !email || !senha) return NextResponse.json({ error: "campos_obrigatorios" }, { status: 400 });
 
   const hash = await bcrypt.hash(senha, 10);
 
@@ -66,62 +65,31 @@ export async function POST(req: NextRequest) {
       data: { nome, email, crm, perfil, senha: hash },
       select: { id: true, nome: true, email: true, crm: true, perfil: true },
     });
-
     return NextResponse.json(created);
   } catch (e: any) {
-    const { code, msg } = prismaMsg(e);
-
-    // Duplicado (unique) — normalmente e-mail
-    if (code === "P2002") {
-      return NextResponse.json(
-        { error: "email_duplicado", details: "Já existe um usuário com esse e-mail." },
-        { status: 409 }
-      );
-    }
-
-    return NextResponse.json(
-      { error: "erro_criar_usuario", details: msg },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "erro_criar_usuario", details: e?.message ?? String(e) }, { status: 500 });
   }
 }
 
 export async function DELETE(req: NextRequest) {
-  if (!(await isAdmin(req))) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  if (!(await isAdmin(req))) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const idStr = new URL(req.url).searchParams.get("id") || "";
-  const id = Number(idStr);
+  const { searchParams } = new URL(req.url);
+  const id = Number(searchParams.get("id") ?? 0);
+  if (!id) return NextResponse.json({ error: "id_obrigatorio" }, { status: 400 });
 
-  if (!id || Number.isNaN(id)) {
-    return NextResponse.json({ error: "id_invalido" }, { status: 400 });
-  }
+  const medico = await prisma.medicoAgenda.findUnique({ where: { id } });
+  if (!medico) return NextResponse.json({ error: "nao_encontrado" }, { status: 404 });
 
-  try {
-    await prisma.medicoAgenda.delete({ where: { id } });
-    return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    const { code, msg } = prismaMsg(e);
+  // remove permissões por email
+  await prisma.permissaoAgenda.deleteMany({ where: { email: medico.email } });
 
-    if (code === "P2025") {
-      return NextResponse.json({ error: "nao_encontrado" }, { status: 404 });
-    }
+  // remove eventos desse médico
+  await prisma.eventoAgenda.deleteMany({ where: { medicoId: id } });
 
-    // FK / vínculo com eventos etc.
-    if (code === "P2003") {
-      return NextResponse.json(
-        {
-          error: "medico_em_uso",
-          details: "Esse médico está vinculado a registros (ex.: eventos). Remova os vínculos antes.",
-        },
-        { status: 409 }
-      );
-    }
+  // remove logs desse médico
+  await prisma.logAcao.deleteMany({ where: { usuarioId: id } });
 
-    return NextResponse.json(
-      { error: "erro_excluir_usuario", details: msg },
-      { status: 500 }
-    );
-  }
+  await prisma.medicoAgenda.delete({ where: { id } });
+  return NextResponse.json({ ok: true });
 }
