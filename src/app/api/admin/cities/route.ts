@@ -60,6 +60,10 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json(created);
   } catch (e: any) {
+    // Prisma unique violation
+    if (e?.code === "P2002") {
+      return NextResponse.json({ error: "local_ja_existe", nome }, { status: 409 });
+    }
     return NextResponse.json({ error: "erro_criar_cidade", details: e?.message ?? String(e) }, { status: 500 });
   }
 }
@@ -74,10 +78,7 @@ export async function DELETE(req: NextRequest) {
   const cidade = await prisma.cidadeAgenda.findUnique({ where: { id } });
   if (!cidade) return NextResponse.json({ error: "nao_encontrado" }, { status: 404 });
 
-  // remove permissões ligadas a esse nome
   await prisma.permissaoAgenda.deleteMany({ where: { cidade: cidade.nome } });
-
-  // remove eventos ligados a esse nome (para não quebrar consistência)
   await prisma.eventoAgenda.deleteMany({ where: { cidade: cidade.nome } });
 
   await prisma.cidadeAgenda.delete({ where: { id } });
