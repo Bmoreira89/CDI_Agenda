@@ -25,16 +25,19 @@ export default function LoginPage() {
         throw new Error(msg);
       }
 
-      // salva usuário
-      localStorage.setItem("CDI_USER", JSON.stringify(data.user));
+      const user = data?.user || {};
+      const perfil = String(user?.perfil ?? "medico").toLowerCase() === "admin" ? "admin" : "medico";
 
-      // admin vai pro painel
-      const perfil = String(data?.user?.perfil ?? "").toLowerCase();
-      if (perfil === "admin") {
-        router.push("/admin");
-      } else {
-        router.push("/calendario");
-      }
+      // ✅ chaves que o /calendario já usa
+      localStorage.setItem("agenda_cdi_perfil", perfil);
+      localStorage.setItem("agenda_cdi_user_id", String(user?.id ?? ""));
+      localStorage.setItem("agenda_cdi_nome", String(user?.nome ?? ""));
+
+      // (opcional) mantém o objeto completo
+      localStorage.setItem("CDI_USER", JSON.stringify(user));
+
+      if (perfil === "admin") router.push("/admin");
+      else router.push("/calendario");
     } catch (e: any) {
       alert(e?.message || "Erro no login");
     } finally {

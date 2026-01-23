@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -16,6 +16,7 @@ interface AgendaEvent {
     cidade?: string;
     medico?: string;
     quantidade?: number;
+    medicoId?: number;
   };
 }
 
@@ -50,13 +51,12 @@ export default function CalendarioPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
+    // ✅ chaves padronizadas (login salva isso)
     const storedPerfil = localStorage.getItem("agenda_cdi_perfil");
     const storedUserId = localStorage.getItem("agenda_cdi_user_id");
     const storedNome = localStorage.getItem("agenda_cdi_nome");
 
-    const perfilAtual: PerfilTipo =
-      storedPerfil === "admin" ? "admin" : "medico";
-
+    const perfilAtual: PerfilTipo = storedPerfil === "admin" ? "admin" : "medico";
     setPerfil(perfilAtual);
 
     if (storedNome) setMedicoNome(storedNome);
@@ -64,22 +64,30 @@ export default function CalendarioPage() {
 
     const carregar = async () => {
       try {
-        const resCid = await fetch("/api/cidades");
-        if (!resCid.ok) throw new Error("Erro ao carregar cidades");
-        const cidades: CidadeApi[] = await resCid.json();
-        setTodasCidades(cidades.map((c) => c.nome));
+        // ✅ cidades por permissão (se médico)
+        let urlCidades = "/api/cidades";
+        if (perfilAtual === "medico" && storedUserId) {
+          urlCidades += `?medicoId=${storedUserId}`;
+        }
 
+        const resCid = await fetch(urlCidades, { cache: "no-store" });
+        if (!resCid.ok) throw new Error("Erro ao carregar locais");
+        const cidades: CidadeApi[] = await resCid.json();
+        setTodasCidades((cidades || []).map((c) => c.nome));
+
+        // ✅ eventos (filtra por medicoId; backend também filtra por permissão)
         let urlEventos = "/api/eventos";
         if (perfilAtual === "medico" && storedUserId) {
           urlEventos += `?medicoId=${storedUserId}`;
         }
 
-        const resEvt = await fetch(urlEventos);
+        const resEvt = await fetch(urlEventos, { cache: "no-store" });
         if (!resEvt.ok) throw new Error("Erro ao carregar eventos");
         setEvents(await resEvt.json());
 
+        // ✅ admin pode listar médicos
         if (perfilAtual === "admin") {
-          const resMed = await fetch("/api/medicos");
+          const resMed = await fetch("/api/medicos", { cache: "no-store" });
           if (resMed.ok) setMedicos(await resMed.json());
         }
       } catch (e) {
@@ -92,17 +100,22 @@ export default function CalendarioPage() {
   }, []);
 
   const handleLogout = () => {
-    localStorage.clear();
+    localStorage.removeItem("agenda_cdi_perfil");
+    localStorage.removeItem("agenda_cdi_user_id");
+    localStorage.removeItem("agenda_cdi_nome");
+    localStorage.removeItem("CDI_USER");
     router.push("/login");
   };
 
   const handleDateClick = (info: { dateStr: string }) => {
     setSelectedDate(info.dateStr);
+
     if (perfil === "medico" && userId) {
       setSelectedMedicoId(userId);
     } else {
       setSelectedMedicoId(null);
     }
+
     setShowCityModal(true);
   };
 
@@ -118,15 +131,20 @@ export default function CalendarioPage() {
         return;
       }
       medicoId = selectedMedicoId;
-      medicoNomeFinal =
-        medicos.find((m) => m.id === selectedMedicoId)?.nome || "Médico";
+      medicoNomeFinal = medicos.find((m) => m.id === selectedMedicoId)?.nome || "Médico";
+    }
+
+    if (!medicoId) {
+      alert("Usuário inválido. Faça login novamente.");
+      router.push("/login");
+      return;
     }
 
     const qtdStr = prompt(`Quantidade de exames em ${cidade}:`);
     if (!qtdStr) return;
 
     const quantidade = Number(qtdStr);
-    if (quantidade <= 0) return alert("Quantidade inválida.");
+    if (!Number.isFinite(quantidade) || quantidade <= 0) return alert("Quantidade inválida.");
 
     const res = await fetch("/api/eventos", {
       method: "POST",
@@ -141,11 +159,15 @@ export default function CalendarioPage() {
     });
 
     if (!res.ok) {
-      alert("Erro ao salvar evento.");
+      const txt = await res.text().catch(() => "");
+      alert(`Erro ao salvar evento. ${txt || ""}`.trim());
       return;
     }
 
-    setEvents((prev) => [...prev, await res.json()]);
+    // ✅ FIX: não pode usar await dentro do setState callback
+    const created = await res.json();
+    setEvents((prev) => [...prev, created]);
+
     setShowCityModal(false);
     setSelectedDate(null);
   };
@@ -153,13 +175,21 @@ export default function CalendarioPage() {
   const handleEventClick = async (info: any) => {
     if (!confirm(`Remover este registro?\n${info.event.title}`)) return;
 
-    await fetch("/api/eventos", {
+    const id = String(info?.event?.id || "").trim();
+    if (!id) return;
+
+    const res = await fetch(`/api/eventos?id=${encodeURIComponent(id)}`, {
       method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: info.event.id }),
+      cache: "no-store",
     });
 
-    setEvents((prev) => prev.filter((e) => e.id !== info.event.id));
+    if (!res.ok) {
+      const t = await res.text().catch(() => "");
+      alert(`Falha ao remover. ${t || ""}`.trim());
+      return;
+    }
+
+    setEvents((prev) => prev.filter((e) => e.id !== id));
   };
 
   return (
@@ -200,16 +230,14 @@ export default function CalendarioPage() {
       {showCityModal && (
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center">
           <div className="bg-white p-4 rounded space-y-2 w-80">
-            <h2 className="font-semibold">Escolha a cidade</h2>
+            <h2 className="font-semibold">Escolha o local</h2>
 
             {perfil === "admin" && (
               <select
                 className="w-full border p-2 rounded"
                 value={selectedMedicoId ?? ""}
                 onChange={(e) =>
-                  setSelectedMedicoId(
-                    e.target.value ? Number(e.target.value) : null
-                  )
+                  setSelectedMedicoId(e.target.value ? Number(e.target.value) : null)
                 }
               >
                 <option value="">Selecione o médico</option>
@@ -233,10 +261,7 @@ export default function CalendarioPage() {
               </button>
             ))}
 
-            <button
-              onClick={() => setShowCityModal(false)}
-              className="text-xs text-slate-500"
-            >
+            <button onClick={() => setShowCityModal(false)} className="text-xs text-slate-500">
               Cancelar
             </button>
           </div>

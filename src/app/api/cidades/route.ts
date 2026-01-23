@@ -5,11 +5,11 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 
 export async function GET(req: NextRequest) {
-  const email = (req.headers.get("x-user-email") || "").trim().toLowerCase();
-  const perfil = (req.headers.get("x-user-perfil") || "").trim().toLowerCase();
+  const { searchParams } = new URL(req.url);
+  const medicoId = Number(searchParams.get("medicoId") ?? 0);
 
-  // admin vê tudo
-  if (perfil === "admin" || !email) {
+  // Se não passar medicoId, retorna tudo (ex.: admin / telas internas)
+  if (!medicoId || Number.isNaN(medicoId)) {
     const cidades = await prisma.cidadeAgenda.findMany({
       orderBy: { nome: "asc" },
       select: { id: true, nome: true },
@@ -17,16 +17,32 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(cidades);
   }
 
-  // medico: filtra por permissões do email
-  const permissoes = await prisma.permissaoCidade.findMany({
-    where: { email, ativo: true },
-    select: { cidadeId: true },
+  const medico = await prisma.medicoAgenda.findUnique({
+    where: { id: medicoId },
+    select: { email: true, perfil: true },
   });
 
-  const ids = permissoes.map((p) => p.cidadeId);
+  if (!medico) return NextResponse.json([], { status: 200 });
+
+  // Admin vê tudo
+  if (String(medico.perfil ?? "").toLowerCase() === "admin") {
+    const cidades = await prisma.cidadeAgenda.findMany({
+      orderBy: { nome: "asc" },
+      select: { id: true, nome: true },
+    });
+    return NextResponse.json(cidades);
+  }
+
+  // Médico: apenas locais permitidos
+  const perms = await prisma.permissaoAgenda.findMany({
+    where: { email: medico.email },
+    select: { cidade: true },
+  });
+
+  const allowed = perms.map((p) => p.cidade);
 
   const cidades = await prisma.cidadeAgenda.findMany({
-    where: { id: { in: ids } },
+    where: { nome: { in: allowed.length ? allowed : ["__sem_permissao__"] } },
     orderBy: { nome: "asc" },
     select: { id: true, nome: true },
   });
