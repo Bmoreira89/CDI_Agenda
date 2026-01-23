@@ -48,10 +48,15 @@ export default function CalendarioPage() {
   const [medicos, setMedicos] = useState<MedicoApi[]>([]);
   const [selectedMedicoId, setSelectedMedicoId] = useState<number | null>(null);
 
+  function headersAuth() {
+    const h: Record<string, string> = {};
+    if (userId) h["x-user-id"] = String(userId);
+    return h;
+  }
+
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    // ✅ chaves padronizadas (login salva isso)
     const storedPerfil = localStorage.getItem("agenda_cdi_perfil");
     const storedUserId = localStorage.getItem("agenda_cdi_user_id");
     const storedNome = localStorage.getItem("agenda_cdi_nome");
@@ -64,30 +69,30 @@ export default function CalendarioPage() {
 
     const carregar = async () => {
       try {
-        // ✅ cidades por permissão (se médico)
-        let urlCidades = "/api/cidades";
-        if (perfilAtual === "medico" && storedUserId) {
-          urlCidades += `?medicoId=${storedUserId}`;
-        }
+        const uid = storedUserId ? Number(storedUserId) : 0;
+        const baseHeaders: Record<string, string> = {};
+        if (uid) baseHeaders["x-user-id"] = String(uid);
 
-        const resCid = await fetch(urlCidades, { cache: "no-store" });
+        // cidades por permissão (se médico) — backend também valida pelo x-user-id
+        let urlCidades = "/api/cidades";
+        if (perfilAtual === "medico" && uid) urlCidades += `?medicoId=${uid}`;
+
+        const resCid = await fetch(urlCidades, { cache: "no-store", headers: baseHeaders });
         if (!resCid.ok) throw new Error("Erro ao carregar locais");
         const cidades: CidadeApi[] = await resCid.json();
         setTodasCidades((cidades || []).map((c) => c.nome));
 
-        // ✅ eventos (filtra por medicoId; backend também filtra por permissão)
+        // eventos — backend valida pelo x-user-id (médico ignora medicoId forjado)
         let urlEventos = "/api/eventos";
-        if (perfilAtual === "medico" && storedUserId) {
-          urlEventos += `?medicoId=${storedUserId}`;
-        }
+        if (perfilAtual === "medico" && uid) urlEventos += `?medicoId=${uid}`;
 
-        const resEvt = await fetch(urlEventos, { cache: "no-store" });
+        const resEvt = await fetch(urlEventos, { cache: "no-store", headers: baseHeaders });
         if (!resEvt.ok) throw new Error("Erro ao carregar eventos");
         setEvents(await resEvt.json());
 
-        // ✅ admin pode listar médicos
+        // admin pode listar médicos
         if (perfilAtual === "admin") {
-          const resMed = await fetch("/api/medicos", { cache: "no-store" });
+          const resMed = await fetch("/api/medicos", { cache: "no-store", headers: baseHeaders });
           if (resMed.ok) setMedicos(await resMed.json());
         }
       } catch (e) {
@@ -110,11 +115,8 @@ export default function CalendarioPage() {
   const handleDateClick = (info: { dateStr: string }) => {
     setSelectedDate(info.dateStr);
 
-    if (perfil === "medico" && userId) {
-      setSelectedMedicoId(userId);
-    } else {
-      setSelectedMedicoId(null);
-    }
+    if (perfil === "medico" && userId) setSelectedMedicoId(userId);
+    else setSelectedMedicoId(null);
 
     setShowCityModal(true);
   };
@@ -148,7 +150,7 @@ export default function CalendarioPage() {
 
     const res = await fetch("/api/eventos", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...headersAuth() },
       body: JSON.stringify({
         date: selectedDate,
         cidade,
@@ -164,7 +166,6 @@ export default function CalendarioPage() {
       return;
     }
 
-    // ✅ FIX: não pode usar await dentro do setState callback
     const created = await res.json();
     setEvents((prev) => [...prev, created]);
 
@@ -181,6 +182,7 @@ export default function CalendarioPage() {
     const res = await fetch(`/api/eventos?id=${encodeURIComponent(id)}`, {
       method: "DELETE",
       cache: "no-store",
+      headers: headersAuth(),
     });
 
     if (!res.ok) {
@@ -199,17 +201,11 @@ export default function CalendarioPage() {
           <h1 className="text-2xl font-semibold">Agenda de exames</h1>
           <div className="flex gap-2">
             {perfil === "admin" && (
-              <button
-                onClick={() => router.push("/admin")}
-                className="border px-3 py-2 rounded text-sm"
-              >
+              <button onClick={() => router.push("/admin")} className="border px-3 py-2 rounded text-sm">
                 Painel admin
               </button>
             )}
-            <button
-              onClick={handleLogout}
-              className="bg-slate-900 text-white px-3 py-2 rounded text-sm"
-            >
+            <button onClick={handleLogout} className="bg-slate-900 text-white px-3 py-2 rounded text-sm">
               Sair
             </button>
           </div>
@@ -236,9 +232,7 @@ export default function CalendarioPage() {
               <select
                 className="w-full border p-2 rounded"
                 value={selectedMedicoId ?? ""}
-                onChange={(e) =>
-                  setSelectedMedicoId(e.target.value ? Number(e.target.value) : null)
-                }
+                onChange={(e) => setSelectedMedicoId(e.target.value ? Number(e.target.value) : null)}
               >
                 <option value="">Selecione o médico</option>
                 {medicos
