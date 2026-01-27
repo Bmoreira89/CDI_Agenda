@@ -1,125 +1,234 @@
-﻿// src/app/api/eventos/route.ts
-export const dynamic = "force-dynamic";
+﻿export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import prisma from "@/lib/prisma";
 
-// ---------- helpers: DATE-ONLY (YYYY-MM-DD) sem timezone ----------
-function toDateOnly(input: unknown): string {
-  const s = String(input ?? "").trim();
-  if (!s) return "";
-  // já veio YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  // veio ISO (YYYY-MM-DDTHH:mm:ss...)
-  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
-  return m?.[1] ?? "";
+/**
+ * Date-only helpers (evita cair no dia anterior por timezone)
+ */
+function isDateOnly(s: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
-// armazena ao MEIO-DIA UTC para não “voltar” dia no -03
-function dateOnlyToSafeUTC(dateOnly: string): Date {
+function toSafeDateFromDateOnly(dateOnly: string) {
+  // Meio-dia UTC garante que nunca “volta um dia” em -03:00
   return new Date(`${dateOnly}T12:00:00.000Z`);
 }
 
-// pega YYYY-MM-DD a partir de um Date do banco
-function dbDateToDateOnly(d: Date): string {
+function dateOnlyFromDate(d: Date) {
+  // Converte para YYYY-MM-DD em UTC
   return d.toISOString().slice(0, 10);
 }
 
-function makeTitle(cidade: string, quantidade: number) {
-  return `${cidade}: ${quantidade} exame(s)`;
+async function getSessionEmail(): Promise<string | null> {
+  const session = await getServerSession(authOptions as any);
+  const email = (session as any)?.user?.email;
+  return typeof email === "string" && email.trim() ? email.trim().toLowerCase() : null;
 }
 
-// ---------- GET: lista eventos do médico logado ----------
-export async function GET() {
-  const session = await getServerSession(authOptions);
-  const email = session?.user?.email;
-  if (!email) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-
-  const eventos = await prisma.eventoAgenda.findMany({
+async function getUserByEmail(email: string) {
+  const u = await prisma.medicoAgenda.findUnique({
     where: { email },
-    orderBy: [{ data: "asc" }, { id: "asc" }],
-    select: { id: true, cidade: true, quantidade: true, data: true },
+    select: { id: true, nome: true, perfil: true, email: true },
   });
 
-  // FullCalendar precisa de start em "YYYY-MM-DD" para allDay sem timezone
-  const payload = eventos.map((e) => ({
-    id: String(e.id),
-    title: makeTitle(e.cidade, e.quantidade),
-    start: dbDateToDateOnly(e.data),
-    allDay: true,
-    extendedProps: {
-      cidade: e.cidade,
-      quantidade: e.quantidade,
-    },
-  }));
-
-  return NextResponse.json(payload);
+  return {
+    id: u?.id ?? null,
+    nome: u?.nome ?? null,
+    perfil: String(u?.perfil ?? "").toLowerCase(),
+    email: u?.email ?? null,
+  };
 }
 
-// ---------- POST: cria evento (apenas inserir; sem editar) ----------
-export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  const email = session?.user?.email;
-  if (!email) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-
-  const body = await req.json().catch(() => ({}));
-  const cidade = String(body?.cidade ?? "").trim();
-  const quantidade = Number(body?.quantidade ?? 0);
-  const dateOnly = toDateOnly(body?.date);
-
-  if (!cidade) return NextResponse.json({ error: "cidade_obrigatoria" }, { status: 400 });
-  if (!dateOnly) return NextResponse.json({ error: "data_obrigatoria" }, { status: 400 });
-  if (!Number.isFinite(quantidade) || quantidade <= 0)
-    return NextResponse.json({ error: "quantidade_invalida" }, { status: 400 });
-
-  // valida permissão do médico para o local
-  const perm = await prisma.permissaoAgenda.findFirst({
-    where: { email, cidade },
-    select: { id: true },
-  });
-
-  if (!perm) return NextResponse.json({ error: "sem_permissao_para_este_local" }, { status: 403 });
-
-  const created = await prisma.eventoAgenda.create({
-    data: {
-      email,
-      cidade,
-      quantidade,
-      data: dateOnlyToSafeUTC(dateOnly),
-    },
-    select: { id: true, cidade: true, quantidade: true, data: true },
-  });
-
-  return NextResponse.json({
-    id: String(created.id),
-    title: makeTitle(created.cidade, created.quantidade),
-    start: dbDateToDateOnly(created.data),
-    allDay: true,
-    extendedProps: { cidade: created.cidade, quantidade: created.quantidade },
-  });
-}
-
-// ---------- DELETE: exclui evento do próprio médico ----------
-export async function DELETE(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  const email = session?.user?.email;
-  if (!email) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-
-  const { searchParams } = new URL(req.url);
-  const id = Number(searchParams.get("id") ?? 0);
-  if (!id) return NextResponse.json({ error: "id_obrigatorio" }, { status: 400 });
-
-  const evento = await prisma.eventoAgenda.findUnique({
+async function getUserById(id: number) {
+  const u = await prisma.medicoAgenda.findUnique({
     where: { id },
-    select: { id: true, email: true },
+    select: { id: true, nome: true, perfil: true, email: true },
   });
 
-  if (!evento) return NextResponse.json({ error: "nao_encontrado" }, { status: 404 });
-  if (evento.email !== email) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  return {
+    id: u?.id ?? null,
+    nome: u?.nome ?? null,
+    perfil: String(u?.perfil ?? "").toLowerCase(),
+    email: u?.email ?? null,
+  };
+}
 
-  await prisma.eventoAgenda.delete({ where: { id } });
-  return NextResponse.json({ ok: true });
+/**
+ * GET /api/eventos
+ * - Médico: retorna apenas do próprio medicoId
+ * - Admin: pode passar ?medicoId=123 para ver de um médico específico, senão retorna todos
+ */
+export async function GET(req: NextRequest) {
+  try {
+    const email = await getSessionEmail();
+    if (!email) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+    const me = await getUserByEmail(email);
+    if (!me.id) return NextResponse.json({ error: "usuario_nao_encontrado" }, { status: 404 });
+
+    const url = new URL(req.url);
+    const medicoIdQuery = Number(url.searchParams.get("medicoId") ?? 0);
+
+    let medicoIdFiltro: number | null = null;
+
+    if (me.perfil === "admin") {
+      medicoIdFiltro = medicoIdQuery > 0 ? medicoIdQuery : null; // null = todos
+    } else {
+      medicoIdFiltro = me.id; // médico só vê o dele
+    }
+
+    const where = medicoIdFiltro ? { medicoId: medicoIdFiltro } : {};
+
+    const eventos = await prisma.eventoAgenda.findMany({
+      where,
+      orderBy: [{ data: "asc" }, { id: "asc" }],
+      select: { id: true, cidade: true, quantidade: true, data: true, medicoId: true, medicoNome: true },
+    });
+
+    const out = eventos.map((e) => ({
+      id: String(e.id),
+      title: `${e.cidade}: ${e.quantidade} exame(s)`,
+      start: dateOnlyFromDate(e.data), // YYYY-MM-DD
+      allDay: true,
+      extendedProps: {
+        cidade: e.cidade,
+        quantidade: e.quantidade,
+        medicoId: e.medicoId,
+        medicoNome: e.medicoNome,
+      },
+    }));
+
+    return NextResponse.json(out);
+  } catch (e: any) {
+    console.error(e);
+    return NextResponse.json(
+      { error: "erro_listar_eventos", details: e?.message ?? String(e) },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * POST /api/eventos
+ * Body: { data: "YYYY-MM-DD", cidade: string, quantidade: number, medicoId?: number }
+ * - Médico: ignora medicoId do body e usa o próprio
+ * - Admin: exige medicoId no body
+ */
+export async function POST(req: NextRequest) {
+  try {
+    const email = await getSessionEmail();
+    if (!email) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+    const me = await getUserByEmail(email);
+    if (!me.id) return NextResponse.json({ error: "usuario_nao_encontrado" }, { status: 404 });
+
+    const body = await req.json().catch(() => ({}));
+
+    const data = String(body?.data ?? "").trim(); // esperado YYYY-MM-DD
+    const cidade = String(body?.cidade ?? "").trim();
+    const quantidadeNum = Number(body?.quantidade ?? 0);
+    const medicoIdBody = Number(body?.medicoId ?? 0);
+
+    if (!isDateOnly(data)) {
+      return NextResponse.json({ error: "data_invalida", esperado: "YYYY-MM-DD" }, { status: 400 });
+    }
+    if (!cidade) return NextResponse.json({ error: "cidade_obrigatoria" }, { status: 400 });
+    if (!Number.isFinite(quantidadeNum) || quantidadeNum < 0) {
+      return NextResponse.json({ error: "quantidade_invalida" }, { status: 400 });
+    }
+
+    let medicoIdFinal = me.id;
+    let medicoNomeFinal = me.nome || "";
+
+    if (me.perfil === "admin") {
+      if (!medicoIdBody || Number.isNaN(medicoIdBody)) {
+        return NextResponse.json({ error: "medicoId_obrigatorio_admin" }, { status: 400 });
+      }
+
+      const alvo = await getUserById(medicoIdBody);
+      if (!alvo.id) return NextResponse.json({ error: "medico_nao_encontrado" }, { status: 404 });
+
+      medicoIdFinal = alvo.id;
+      medicoNomeFinal = alvo.nome || "";
+    } else {
+      // médico comum: precisa ter nome
+      if (!medicoNomeFinal) {
+        return NextResponse.json({ error: "medico_sem_nome_no_cadastro" }, { status: 400 });
+      }
+    }
+
+    const safeDate = toSafeDateFromDateOnly(data);
+
+    const created = await prisma.eventoAgenda.create({
+      data: {
+        medicoId: medicoIdFinal,
+        medicoNome: medicoNomeFinal, // ✅ obrigatório no seu schema
+        cidade,
+        quantidade: quantidadeNum,
+        data: safeDate,
+      },
+      select: { id: true, cidade: true, quantidade: true, data: true, medicoId: true, medicoNome: true },
+    });
+
+    return NextResponse.json({
+      id: String(created.id),
+      title: `${created.cidade}: ${created.quantidade} exame(s)`,
+      start: dateOnlyFromDate(created.data),
+      allDay: true,
+      extendedProps: {
+        cidade: created.cidade,
+        quantidade: created.quantidade,
+        medicoId: created.medicoId,
+        medicoNome: created.medicoNome,
+      },
+    });
+  } catch (e: any) {
+    console.error(e);
+    return NextResponse.json(
+      { error: "erro_criar_evento", details: e?.message ?? String(e) },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * DELETE /api/eventos?id=123
+ * - Médico: só pode deletar eventos dele
+ * - Admin: pode deletar qualquer
+ */
+export async function DELETE(req: NextRequest) {
+  try {
+    const email = await getSessionEmail();
+    if (!email) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+    const me = await getUserByEmail(email);
+    if (!me.id) return NextResponse.json({ error: "usuario_nao_encontrado" }, { status: 404 });
+
+    const url = new URL(req.url);
+    const id = Number(url.searchParams.get("id") ?? 0);
+    if (!id) return NextResponse.json({ error: "id_obrigatorio" }, { status: 400 });
+
+    const ev = await prisma.eventoAgenda.findUnique({
+      where: { id },
+      select: { id: true, medicoId: true },
+    });
+    if (!ev) return NextResponse.json({ error: "nao_encontrado" }, { status: 404 });
+
+    if (me.perfil !== "admin" && ev.medicoId !== me.id) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
+
+    await prisma.eventoAgenda.delete({ where: { id } });
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    console.error(e);
+    return NextResponse.json(
+      { error: "erro_excluir_evento", details: e?.message ?? String(e) },
+      { status: 500 }
+    );
+  }
 }
